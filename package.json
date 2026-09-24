@@ -1,0 +1,17 @@
+{
+  "name": "bilibili-web-client",
+  "version": "2.0.0",
+  "description": "Node.js B站网页版：搜索、播放、扫码登录、历史记录、收藏夹、个性化推荐",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "qrcode": "^1.5.4"
+  }
+}

@@ -1,0 +1,843 @@
+WristBilibili API 接口清单（2026 最新更新版）
+
+来源（原）：WristBilibili-master/app/src/main/java/cn/luern0313/wristbilibili/api/
+来源（新）：GitHub 开源库 BiliBili-API-main（com.esdllm.bilibiliApi，Java 客户端，2026-09 持续实测维护）
+更新方式：逐条对照 2026-09-23 实际请求实测（curl，UA=Chrome/124 Windows，Referer=https://www.bilibili.com/）+
+          镜像文档（lxb007981.github.io/bilibili-API-collect、gitee.com/MrVanme/bilibili-API-collect）+
+          本 GitHub 新库的实测结论（含 WBI 签名 2×2 对照表、playurl 路径对照等）
+
+说明：
+- 每条接口标注【状态】：沿用 / 替换 / 废弃 / 未确认
+- 【鉴权】列说明 2026 年调用所需的凭据：Cookie / CSRF（bili_jct）/ WBI 签名 / buvid3 设备指纹
+- 原始清单中的"源码旧接口"保留在【旧 URL】里供对照；2026 年可直接使用的写在【URL】
+- 实测规则：GET 返回 JSON code=0 为可用；POST 不带 Cookie 返回 -101/-401/-352（非 404）即端点存活；
+  -412 = 需 WBI；-352 = 风控（多为缺 buvid3 或 UA/Referer 形状不对）
+- 所有 POST 接口仅验证端点存活，未发起任何真实点赞/投币/收藏等破坏性请求
+
+==========================================================================================
+AnimationTimelineApi
+==========================================================================================
+
+接口/方法：getAnimTimelineList
+Java 方法：public ArrayList<AnimationTimelineModel> getAnimTimelineList() throws IOException
+URL：https://bangumi.bilibili.com/web_api/timeline_global
+HTTP：GET
+【状态】沿用
+【鉴权】无
+【实测】HTTP=200, JSON code=0，返回每日番剧更新时间表；探测 pgc/web/timeline/global 与
+        pgc/calendar/timeline 均 404，旧域名未迁移，无需替换。
+
+==========================================================================================
+ArticleApi
+==========================================================================================
+
+接口/方法：getArticleModel
+Java 方法：public ArticleModel getArticleModel() throws IOException
+URL：https://api.bilibili.com/x/article/viewinfo?id={cvid}        ← 主接口，沿用
+旧 URL：https://www.bilibili.com/read/mobile/                     （302 重定向，无需直接调用）
+旧 URL：https://api.bilibili.com/x/article/cards?ids=             （仍存活但触发风控 -352，需登录+完整 Cookie）
+旧 URL：https://api.bilibili.com/x/article/more?aid=             【废弃】HTTP 404，专栏相关推荐已下线
+HTTP：GET
+【状态】部分沿用：viewinfo 可用；cards 风控；more 废弃
+【鉴权】viewinfo 无；cards 需登录 Cookie+WBI 风控
+【实测】viewinfo?id=1 → code=0；cards → code=-352；more → HTML 404
+
+接口/方法：likeArticle
+Java 方法：public String likeArticle(int mode) throws IOException  //1点赞，2取消
+URL：https://api.bilibili.com/x/article/like
+HTTP：POST
+请求参数：id={article_id}&type={mode}&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101（端点存活）。错误码 65006 = 已赞过
+
+接口/方法：coinArticle
+Java 方法：public String coinArticle() throws IOException
+URL：https://api.bilibili.com/x/web-interface/coin/add
+HTTP：POST
+请求参数：aid={article_id}&multiply=1&upid={up_mid}&avtype=2&csrf={bili_jct}   //avtype=2 区分专栏
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+接口/方法：favArticle
+Java 方法：public String favArticle(int mode) throws IOException //1添加 2删除
+URL：https://api.bilibili.com/x/article/favorites/add
+URL：https://api.bilibili.com/x/article/favorites/del
+HTTP：POST
+请求参数：id={article_id}&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】add/del → code=-101（专栏收藏仍走独立接口，未并入 v3/fav 体系）
+
+接口/方法：shareArticle
+Java 方法：public String shareArticle(String text) throws IOException
+URL：https://api.vc.bilibili.com/dynamic_repost/v1/dynamic_repost/share
+HTTP：POST
+请求参数：csrf_token={bili_jct}&platform=pc&type=64&uid=&share_uid={mid}&content={text}
+          &repost_code=20000&rid={article_id}
+【状态】沿用（动态写入接口仍留在 vc 域，未迁移）
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+接口/方法：followUp
+Java 方法：public String followUp() throws IOException
+URL：https://api.bilibili.com/x/relation/modify
+HTTP：POST
+请求参数：fid={up_mid}&act=1&re_src=115&jsonp=jsonp&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+==========================================================================================
+BangumiApi
+==========================================================================================
+
+接口/方法：getBangumiInfo
+Java 方法：public BangumiModel getBangumiInfo() throws IOException
+URL：https://api.bilibili.com/pgc/view/web/season          ← 替换
+旧 URL：https://api.bilibili.com/pgc/view/app/season       【废弃】返回 -400
+HTTP：GET
+请求参数：season_id={season_id}（或 ep_id 二选一）
+【状态】替换
+【鉴权】无（匿名可获取番剧详情）
+【实测】app/season → code=-400；web/season?season_id=33415 → code=0（返回 web 端字段 result.media/result.episodes）
+【注意】返回结构字段从 app 端切换到 web 端，模型需调整
+
+接口/方法：getBangumiRecommend
+Java 方法：public ArrayList<ListBangumiModel> getBangumiRecommend() throws IOException
+URL：https://api.bilibili.com/pgc/web/recommend/related/recommend
+HTTP：GET
+请求参数：season_id={season_id}
+【状态】沿用
+【鉴权】无
+【实测】→ code=0，result.relates 返回推荐列表
+
+接口/方法：followBangumi
+Java 方法：public String followBangumi(boolean isFollow) throws IOException
+URL：https://api.bilibili.com/pgc/web/follow/add
+URL：https://api.bilibili.com/pgc/web/follow/del
+HTTP：POST
+请求参数：season_id={season_id}&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-401（未授权，端点存活）
+
+接口/方法：shareBangumi
+Java 方法：public String shareBangumi(String text) throws IOException
+URL：https://api.vc.bilibili.com/dynamic_repost/v1/dynamic_repost/share
+HTTP：POST
+请求参数：csrf_token={bili_jct}&platform=pc&type=8&uid=&share_uid={mid}&content={text}
+          &repost_code=20000&rid={aid}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+接口/方法：sendReply
+Java 方法：public String sendReply(String text) throws IOException
+URL：https://api.bilibili.com/x/v2/reply/add
+HTTP：POST
+请求参数：oid={aid}&type=1&message={text}&plat=1&jsonp=jsonp&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+==========================================================================================
+ConfInfoApi
+==========================================================================================
+
+（源码无实际 URL 接口调用，仅常量定义：USER_AGENT、TV appkey/build 等）
+2026 注意：TV 端 appkey 体系随密码登录通道关闭已不可用，见 UserLoginApi.Login。
+
+==========================================================================================
+DownloadApi
+==========================================================================================
+
+（无实际 URL 调用，下载逻辑直接使用 OnlineVideoApi 的播放地址，无需更新）
+
+==========================================================================================
+DynamicApi
+==========================================================================================
+
+接口/方法：getDynamic
+Java 方法：public void getDynamic() throws IOException
+URL：https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all            ← 替换（关注/全部动态流，需登录）
+URL：https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?host_mid={mid}   ← 替换（空间动态，需WBI）
+旧 URL：https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/dynamic_new   【废弃】code=4100000 旧错误码体系
+旧 URL：https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history 【废弃】HTTP 404
+HTTP：GET
+【状态】替换（动态读取接口已全部从 vc 域迁移到 polymer 域）
+【鉴权】feed/all 需登录 Cookie；feed/space 需 Cookie + WBI 签名
+【注意】feed/space 必须带 features=itemOpusStyle,listOnlyfans,opusBigCover,onlyfansVote 参数，
+        否则返回空 items（来自新库实测）；Referer 用 https://space.bilibili.com/{mid}/dynamic
+
+接口/方法：getHistoryDynamic
+Java 方法：public void getHistoryDynamic() throws IOException
+URL：https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?id={dynamic_id}   ← 替换
+旧 URL：https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/dynamic_history   【废弃】404
+旧 URL：https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history      【废弃】404
+旧 URL：https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/get_dynamic_detail【废弃】404
+HTTP：GET
+请求参数：id={dynamic_id}（注意参数名必须是 id，不是 dynamic_id/rid，否则返回 code:4101139）
+【状态】替换
+【鉴权】匿名可用（带 Cookie 更稳）
+【实测】detail?id=0 → code=500（无效 id 但端点存活）；新库实测匿名可用，返回 LEGACY schema
+
+接口/方法：likeDynamic
+Java 方法：public String likeDynamic(String dynamicId, String action) throws IOException //1点赞 2取消
+URL：https://api.vc.bilibili.com/dynamic_like/v1/dynamic_like/thumb
+HTTP：POST
+请求参数：uid={mid}&dynamic_id={dynamicId}&up={action}&csrf_token={bili_jct}
+【状态】沿用（动态点赞仍在 vc 域；探测 polymer 域 feed/action/thumb 不存在）
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+==========================================================================================
+FavorBoxApi
+==========================================================================================
+
+接口/方法：getFavorBox
+Java 方法：public FavorBoxModel getFavorBox() throws IOException
+URL：https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid={mid}    ← 替换
+旧 URL：http://space.bilibili.com/ajax/fav/getBoxList?mid={mid}                 【废弃】返回风控 HTML
+HTTP：GET
+【状态】替换
+【鉴权】Cookie（查自己/私密收藏夹需登录；匿名 code=0 但 list 为空——别用外层 code 判，要判 data.list）
+【实测】旧端 → HTML 风控页；新端 → code=0
+【注意】返回 data.list[] 里 id 才是 media_id（fid 是另一套短 id），取夹内内容用 id
+
+==========================================================================================
+FavorOtherApi
+==========================================================================================
+
+接口/方法：getFavorArticle
+Java 方法：public ArrayList<ListArticleModel> getFavorArticle(int page) throws IOException
+URL：https://api.bilibili.com/x/article/favorites/list/all
+HTTP：GET
+请求参数：ps=16&pn={page}
+【状态】沿用
+【鉴权】Cookie
+【实测】→ code=-101
+
+接口/方法：cancelFavorArticle
+Java 方法：public String cancelFavorArticle(String id) throws IOException
+URL：https://api.bilibili.com/x/article/favorites/del
+HTTP：POST
+请求参数：id={id}&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+==========================================================================================
+FavorVideoApi
+==========================================================================================
+
+接口/方法：getFavorVideo
+Java 方法：public ArrayList<ListVideoModel> getFavorVideo(int page) throws IOException
+URL：https://api.bilibili.com/x/v3/fav/resource/list?media_id={mlid}&pn={page}&ps=30&platform=web   ← 替换
+旧 URL：http://api.bilibili.com/x/space/fav/arc?vmid={mid}&ps=30&fid={fid}&tid=0&keyword=&pn={page}&order=fav_time
+        （旧端仍存活返回 code=53013 隐私错误码，但已不推荐）
+HTTP：GET
+请求参数：media_id={完整mlid}=收藏夹id+创建者mid尾号2位；支持 order=mtime/view/pubtime、keyword
+【状态】替换
+【鉴权】Cookie（公开夹匿名可读；私密夹返回 -403 资源权限不足）
+【实测】新端 → code=0
+
+接口/方法：cancelFavVideo
+Java 方法：public String cancelFavVideo(String aid) throws IOException
+URL：https://api.bilibili.com/x/v3/fav/resource/deal    ← 替换
+旧 URL：https://api.bilibili.com/medialist/gateway/coll/resource/batch/del   【废弃】返回 -401
+HTTP：POST
+请求参数：rid={aid}&type=2&add_media_ids=&del_media_ids={mlid}&csrf={bili_jct}
+        （新端同时支持添加/删除，删除填 del_media_ids）
+【状态】替换
+【鉴权】Cookie + CSRF（新库实测还需 WBI 签名）
+【实测】旧端 → code=-401；新端 → code=-101
+
+==========================================================================================
+HistoryApi
+==========================================================================================
+
+接口/方法：getHistory
+Java 方法：public ArrayList<ListVideoModel> getHistory(int pn) throws IOException
+URL：https://api.bilibili.com/x/web-interface/history/cursor?ps=30        ← 新版（推荐，游标翻页）
+旧 URL：https://api.bilibili.com/x/v2/history?pn={pn}&ps=30                （仍存活，pn/ps 分页）
+HTTP：GET
+请求参数：新版用 cursor（max+view_at+business）游标回传翻页，支持视频/直播/专栏/番剧混合
+【状态】沿用（旧端可用，新版推荐）
+【鉴权】Cookie（匿名 -101）
+【实测】旧端 → code=-101；新端 → code=-101
+
+接口/方法：delHistory
+Java 方法：public String delHistory(String aid) throws IOException
+URL：https://api.bilibili.com/x/v2/history/delete
+HTTP：POST
+请求参数：kid=archive_{aid}&jsonp=jsonp&csrf={bili_jct}
+        （kid 格式：视频 archive_{aid}、直播 live_{roomid}、专栏 article_{cvid}、番剧 pgc_{ssid}）
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+==========================================================================================
+LotteryApi
+==========================================================================================
+
+接口/方法：getLottery
+Java 方法：public LotteryModel getLottery() throws IOException
+URL：https://api.vc.bilibili.com/lottery_svr/v1/lottery_svr/lottery_notice
+HTTP：GET
+请求参数：dynamic_id={dynamicId}
+【状态】未确认（端点未 404，但对测试 id 返回 -9999 服务系统错误）
+【鉴权】可能需 Cookie
+【备注】较冷门接口，需携带真实含抽奖的 dynamic_id 才能验证 code=0；
+        或用 Frida 抓腕上哔哩运行时请求确认（见文末附录）。
+
+==========================================================================================
+OnlineVideoApi
+==========================================================================================
+
+接口/方法：connectionVideoUrl
+Java 方法：public void connectionVideoUrl() throws IOException
+URL：https://api.bilibili.com/x/player/playurl           ← 沿用（注意：不带 /wbi/ 的路径）
+旧 URL（备用）：https://api.bilibili.com/x/player/wbi/playurl
+HTTP：GET
+请求参数：avid={aid}&cid={cid}&qn=64&fnval=1（MP4 走 durl；fnval=16 走 dash）
+【状态】沿用
+【鉴权】低清匿名可；高清/DASH 需 Cookie
+【注意】⚠️ 新库 2026-09-22 实测：x/player/wbi/playurl 在七种组合下全部 HTTP 412，
+        而去掉 /wbi/ 的 x/player/playurl 立刻 code=0（叠加 platform=html5&high_quality=1 匿名也通）。
+        推荐走非 wbi 路径；此路径风控姿态不稳定，建议做失败降级。
+
+接口/方法：getDanmakuUrl
+Java 方法：public String getDanmakuUrl()
+URL：https://comment.bilibili.com/{cid}.xml              ← 沿用（旧 XML 未下线）
+等价：https://api.bilibili.com/x/v1/dm/list.so?oid={cid}
+新增：https://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid={cid}&segment_index={n}   （protobuf 分段弹幕）
+HTTP：GET
+【状态】沿用 + 新增 seg.so
+【鉴权】无
+【实测】comment.bilibili.com/62131.xml → 完整 XML；x/v1/dm/list.so?oid=62131 → 相同 XML
+【注意】list.so 响应是 deflate 压缩的 XML（不是 JSON），oid 传 cid（不是 aid/bvid），
+        传错值服务端回 HTTP 400。新客户端建议用 seg.so 取全量分段弹幕。
+
+接口/方法：playHistory
+Java 方法：public String playHistory(int playTime, boolean isFin) throws IOException
+URL：https://api.bilibili.com/x/report/web/heartbeat
+HTTP：POST
+请求参数：aid={aid}&cid={cid}&mid={mid}&csrf={bili_jct}&played_time={t}&realtime={t}
+          &start_ts={now-t}&type=3&dt=2&play_type={1|4}
+【状态】沿用
+【鉴权】Cookie + CSRF（实测无 Cookie 也返回 code=0，心跳要求宽松）
+
+==========================================================================================
+PopularApi
+==========================================================================================
+
+接口/方法：getPopularVideo
+Java 方法：public boolean getPopularVideo(int pn) throws IOException
+URL：https://api.bilibili.com/x/web-interface/popular
+HTTP：GET
+请求参数：ps=20&pn={pn}
+【状态】沿用
+【鉴权】无（匿名可用）
+【实测】→ code=0, data.list 返回视频条目
+
+==========================================================================================
+PopularHistoryApi
+==========================================================================================
+
+接口/方法：getPopularHistoryVideo
+Java 方法：public void getPopularHistoryVideo() throws IOException
+URL：https://api.bilibili.com/x/web-interface/popular/precious
+HTTP：GET
+请求参数：page_size=100&page=1
+【状态】沿用
+【鉴权】无
+【实测】→ code=0, data.title="入站必刷", data.media_id=496307088
+
+==========================================================================================
+PopularWeeklyApi
+==========================================================================================
+
+接口/方法：getPopularWeeklyIssueList
+Java 方法：public void getPopularWeeklyIssueList() throws IOException
+URL：https://api.bilibili.com/x/web-interface/popular/series/list
+HTTP：GET
+【状态】沿用
+【鉴权】无
+【实测】→ code=0，最新期 number=391
+
+接口/方法：getPopularWeeklyVideoList
+Java 方法：public void getPopularWeeklyVideoList(int number) throws IOException
+URL：https://api.bilibili.com/x/web-interface/popular/series/one
+HTTP：GET
+请求参数：number={number}
+【状态】沿用（但新增设备指纹要求）
+【鉴权】buvid3 Cookie（非 WBI）—— 需先调 https://api.bilibili.com/x/frontend/finger/spi
+        获取 b_3 写入 Cookie，否则匿名裸调返回 -352
+【实测】无 Cookie → code=-352；携带 buvid3 → code=0
+【注意】这是 2026 年新增风控：所有涉及"设备指纹"的接口（popular/series/one 等）都要先取 buvid3。
+
+==========================================================================================
+RankingApi
+==========================================================================================
+
+接口/方法：getRankingVideo
+Java 方法：public RankingModel getRankingVideo(String rid) throws IOException
+URL：https://api.bilibili.com/x/web-interface/ranking/v2
+HTTP：GET
+请求参数：rid={rid}&type=all（rid 0=全站、1=动画…）
+【状态】沿用
+【鉴权】无（匿名可用）
+【注意】⚠️ Referer 不能带站根（https://www.bilibili.com/），否则 -352 风控；
+        应带 https://www.bilibili.com/v/popular/rank/all 或不带（新库实测 4 次复现）
+
+接口/方法：getPickUpVideo
+Java 方法：public LinkedHashMap<Integer, String> getPickUpVideo()
+URL：http://luern0313.cn:8080/bp/getHistoryPickUpVideo
+HTTP：GET
+【状态】废弃（作者个人服务已失效）
+【实测】HTTP=200, body="404 not found"（13 字节）
+【建议】非 B 站官方接口，作者自建后端已不提供，从代码中移除。
+
+==========================================================================================
+RecommendApi
+==========================================================================================
+
+接口/方法：getRecommendVideo
+Java 方法：public ArrayList<RecommendModel> getRecommendVideo(boolean isPull) throws IOException
+URL：http://app.bilibili.com/x/v2/feed/index      ← 沿用（反直觉：旧 APP feed 接口并未下线）
+增强：https://api.bilibili.com/x/web-interface/wbi/index/top/feed/rcmd   （登录态个性化推荐，需WBI）
+HTTP：GET
+【状态】沿用（旧端匿名通用推荐仍 code=0）
+【鉴权】旧端无；wbi rcmd 需 Cookie + WBI 签名
+【实测】旧端 → code=0, data.items 返回卡片流
+
+==========================================================================================
+ReplyApi
+==========================================================================================
+
+接口/方法：getReply
+Java 方法：public int getReply(int page, String sort, int limit, ReplyModel root) throws IOException
+URL：https://api.bilibili.com/x/v2/reply/main            ← 补全（主评论）
+URL：https://api.bilibili.com/x/v2/reply/reply           ← 补全（楼中楼）
+旧 URL：https://api.bilibili.com/x/v2                     （源码 URL 不完整，访问返回 HTML 错误页）
+HTTP：GET
+请求参数：主评论 type=1&oid={aid}&mode={sort}&next={page}
+          子评论 type=1&oid={aid}&root={rpid}&pn={page}&ps={limit}
+【状态】替换（补全 URL）
+【鉴权】无（公开评论匿名可读；文档标 WBI 但实测不需要）
+【实测】reply/main?type=1&oid=2 → code=0, all_count=89286；reply/reply → code=0
+【注意】oid 传 aid 不传 bvid，否则返回空列表不报错；sort: 0=时间 1=点赞 2=热度
+
+接口/方法：sendReply
+Java 方法：public String sendReply(String rpid, String text) throws IOException
+URL：https://api.bilibili.com/x/v2/reply/add
+HTTP：POST
+请求参数：oid={oid}&type={type}&root={rpid}&parent={rpid}&message={text}&jsonp=jsonp&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+接口/方法：reportReply
+Java 方法：public String reportReply(String replyId, String reason) throws IOException
+URL：https://api.bilibili.com/x/v2/reply/report
+HTTP：POST
+请求参数：oid={oid}&type={type}&rpid={replyId}&reason={reason}&content=&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF + 风控（实测触发 -352，需完整 UA/Referer/buvid3）
+【实测】→ code=-352（端点存活，风控拦截）
+
+接口/方法：likeReply
+Java 方法：public String likeReply(ReplyModel replyModel, int action, String type)
+URL：https://api.bilibili.com/x/v2/reply/action
+HTTP：POST
+请求参数：oid={oid}&type={type}&rpid={rpid}&action={action}&jsonp=jsonp&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+接口/方法：hateReply
+Java 方法：public String hateReply(ReplyModel replyModel, int action, String type)
+URL：https://api.bilibili.com/x/v2/reply/hate
+HTTP：POST
+请求参数：oid={oid}&type={type}&rpid={rpid}&action={action}&jsonp=jsonp&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+==========================================================================================
+SearchApi
+==========================================================================================
+
+接口/方法：getHotWord
+Java 方法：public String[] getHotWord() throws IOException
+URL：https://s.search.bilibili.com/main/hotword                ← 沿用（APP 端热搜）
+URL：https://api.bilibili.com/x/web-interface/search/all/v2    ← 沿用（综合搜索，必须带 keyword）
+新增：https://api.bilibili.com/x/web-interface/search/square?limit=10   ← Web 端热搜方块
+HTTP：GET
+请求参数：all/v2 必须带 keyword（否则 -400）；square 用 limit 控制条数
+【状态】沿用
+【鉴权】无（匿名可用）
+【实测】main/hotword → code=0；all/v2?keyword=test → code=0；square?limit=10 → code=0
+【注意】2026-09 新库实测：wbi/search/all/v2 与 wbi/search/type 均不强制 WBI 签名（文档标注过时）
+
+==========================================================================================
+SendDynamicApi
+==========================================================================================
+
+接口/方法：shareVideo
+Java 方法：public void shareVideo(String text) throws IOException
+URL：https://api.vc.bilibili.com/dynamic_repost/v1/dynamic_repost/share
+HTTP：POST
+请求参数：csrf_token={bili_jct}&platform=pc&uid={up_mid}&type=8&share_uid={mid}&content={text}
+          &repost_code=20000&rid={aid}
+【状态】沿用（动态写入仍在 vc 域）
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+接口/方法：sendDynamic
+Java 方法：public String sendDynamic(String text) throws IOException
+URL：https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create
+HTTP：POST
+请求参数：dynamic_id=0&type=4&rid=0&content={text}
+          &extension={"emoji_type":1,"from":{"emoji_type":1},"flag_cfg":{}}&at_uids=&ctrl=[]&csrf_token={bili_jct}
+【状态】沿用（探测 polymer 域 opus/create 不存在）
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+接口/方法：sendDynamicWithDynamic
+Java 方法：public String sendDynamicWithDynamic(String dyid, String text) throws IOException
+URL：https://api.vc.bilibili.com/dynamic_repost/v1/dynamic_repost/repost
+HTTP：POST
+请求参数：uid={mid}&dynamic_id={dyid}&content={text}&extension={"emoji_type":1}&at_uids=&ctrl=[]&csrf_token={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+==========================================================================================
+SettingApi
+==========================================================================================
+
+（源码无实际 URL 接口调用，仅本地设置存储，无需更新）
+
+==========================================================================================
+StatisticsApi
+==========================================================================================
+
+接口/方法：Statistics
+Java 方法：public static void Statistics(String uid) throws IOException
+URL：http://luern0313.cn:8080/b/statistic?uid={uid}
+HTTP：GET
+【状态】未确认（作者自建非官方服务，2026-09 服务仍存活但参数校验严）
+【实测】HTTP=200, JSON code=-1 "Illegal parameters."
+【建议】仅接受 App 真实上报过的 uid；不保证长期可用，应做失败降级，不阻塞主流程。
+
+==========================================================================================
+UnsupportedLinkApi
+==========================================================================================
+
+（源码无实际 URL 接口调用，仅处理不支持的链接类型跳转，无需更新）
+
+==========================================================================================
+UserApi
+==========================================================================================
+
+接口/方法：getUserInfo
+Java 方法：public UserModel getUserInfo() throws IOException
+URL：https://api.bilibili.com/x/space/wbi/acc/info?mid={mid}     ← 替换
+旧 URL：http://app.bilibili.com/x/v2/space?vmid={mid}             【废弃】需 App 私有签名，裸请求 -400
+HTTP：GET
+【状态】替换
+【鉴权】WBI 签名 + 登录 Cookie（新库 2×2 实测：签名+凭据两者都要，否则 -352/-403）
+【实测】旧端 → code=-400；wbi/acc/info 裸调 → -352
+【注意】旧非 WBI 版 x/space/acc/info 对部分 mid 仍返回 code=0 属灰色残留，不可依赖
+
+接口/方法：getUserVideo
+Java 方法：public ArrayList<ListVideoModel> getUserVideo(int page) throws IOException
+URL：https://api.bilibili.com/x/space/wbi/arc/search      ← 沿用但注意新路径
+旧 URL：https://api.bilibili.com/x/space/arc/search
+HTTP：GET
+请求参数：mid={mid}&ps=30&tid=0&pn={page}&keyword=&order=pubdate&jsonp=jsonp
+【状态】沿用（2026 年起已纳入 WBI 风控）
+【鉴权】WBI 签名 + 登录 Cookie（裸请求 → HTTP 412 / -799 请求过于频繁）
+【实测】首次 → code=-799；复测 → HTTP 412 风控 HTML
+
+接口/方法：getUserBangumi
+Java 方法：public ArrayList<ListBangumiModel> getUserBangumi(int page, int mode) throws IOException
+URL：https://api.bilibili.com/x/space/bangumi/follow/list
+HTTP：GET
+请求参数：type={mode}&pn={page}&ps=20&vmid={mid}
+        （type: 1=番剧 2=国创 3=电影 4=电视剧）
+【状态】沿用
+【鉴权】Cookie（查他人公开追番可匿名，查自身需登录）
+【实测】→ code=0，未触发 WBI
+
+接口/方法：getUserFollow
+Java 方法：public ArrayList<UserListPeopleModel> getUserFollow(int page) throws IOException
+URL：https://api.bilibili.com/x/relation/followings
+HTTP：GET
+请求参数：vmid={mid}&pn={page}&ps=20&order=desc
+【状态】沿用（与 followers 不对称：followings 未强制 WBI）
+【鉴权】Cookie（匿名 -101）
+【实测】→ code=-101
+
+接口/方法：getUserFans
+Java 方法：public ArrayList<UserListPeopleModel> getUserFans(int page) throws IOException
+URL：https://api.bilibili.com/x/relation/followers
+HTTP：GET
+请求参数：vmid={mid}&pn={page}&ps=20&order=desc
+【状态】沿用（2026 年起已强制 WBI 签名）
+【鉴权】WBI 签名 + Cookie（裸调 → -352 风控校验失败）
+【实测】→ code=-352
+
+接口/方法：follow / unfollow
+Java 方法：public String follow() / unfollow() throws IOException
+URL：https://api.bilibili.com/x/relation/modify
+HTTP：POST
+请求参数：fid={mid}&act={1关注|2取关}&re_src=11&jsonp=jsonp&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+==========================================================================================
+UserInfoApi
+==========================================================================================
+
+接口/方法：getUserInfo
+Java 方法：public int getUserInfo() throws IOException
+URL：https://api.bilibili.com/x/web-interface/nav
+HTTP：GET
+【状态】沿用
+【鉴权】Cookie（登录态）；未登录返回 data.isLogin=false
+【注意】nav 是获取 WBI 签名密钥（data.wbi_img.img_url/sub_url 文件名）的官方来源——
+        未登录调用也能拿到 img_key/sub_key（新库实测强调：判 wbi_img 是否存在，别看外层 code）
+
+==========================================================================================
+UserLoginApi
+==========================================================================================
+
+接口/方法：getLoginQR
+Java 方法：public Bitmap getLoginQR() throws Exception
+URL：https://passport.bilibili.com/x/passport-login/web/qrcode/generate      ← 替换
+旧 URL：https://passport.bilibili.com/qrcode/getLoginUrl                      （旧端实测仍存活，官方已迁移）
+HTTP：GET
+【状态】替换（建议尽快切换，旧端随时随官方下线）
+【鉴权】无
+【实测】旧端 → code=0 返回 oauthKey；新端 → code=0 返回 data.url + data.qrcode_key（32字符，有效期180秒）
+【注意】字段名 oauthKey → qrcode_key
+
+接口/方法：getLoginState
+Java 方法：public Response getLoginState() throws IOException
+URL：https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key={key}   ← 替换
+旧 URL：https://passport.bilibili.com/qrcode/getLoginInfo（POST oauthKey=…&gourl=…）
+HTTP：GET（新版；旧版为 POST）
+【状态】替换
+【鉴权】无
+【实测】新版 → 外层 code=0，真正状态在 data.code：0=登录成功 / 86038=已失效 / 86090=未扫码 / 86101=已扫未确认
+【注意】⚠️ 两个大坑（新库 2026-09-16 实测）：
+  1) 外层 code 恒为 0，必须判 data.code；
+  2) 登录成功后凭据（SESSDATA/bili_jct/DedeUserID/DedeUserID__ckMd5）随 Set-Cookie 响应头下发，
+     不是从 data.url 解析——沿用老文档"解析 data.url"必然失败且无痕迹。取凭据后要 URL 解码。
+
+接口/方法：Login（TV端账号密码登录）
+Java 方法：public String Login(String name, String pw)
+URL：https://passport.bilibili.com/x/passport-login/web/key    （RSA公钥+hash，仅 web 密码登录链可用）
+URL：https://passport.bilibili.com/x/passport-login/web/login   （web 密码登录，需极验验证码）
+旧 URL：https://passport.bilibili.com/api/v3/oauth2/login        【废弃】code=-404 啥都木有
+旧 URL：https://passport.bilibili.com/api/login/sso              【废弃】code=-400
+旧 URL：https://passport.bilibili.com/api/oauth2/getKey          （存活但下游已死，无意义）
+HTTP：POST / GET
+【状态】废弃（TV 端密码登录通道已关闭，无替代）
+【实测】v3/oauth2/login → -404；login/sso → -400
+【建议】腕端应彻底移除 TV 密码登录分支，改走扫码登录（getLoginQR+getLoginState）。
+        如需保留密码登录：web/key 取 RSA（hash 20秒有效）→ base64(RSA_PKCS1(hash+密码)) →
+        web/login（需先过 x/passport-login/captcha 的极验，无法纯代码完成）
+
+接口/方法：getAccessKey
+Java 方法：public String getAccessKey(final String cookie) throws IOException
+URL：（无）—— 官方已关闭该能力
+旧 URL：https://passport.bilibili.com/login/app/third
+旧 URL：http://link.acg.tv/forum.php&appkey=…
+HTTP：GET
+【状态】废弃
+【实测】→ code=20000 "该版本已不支持当前功能，请升级新版本"
+【建议】Cookie 换 access_key 通道关闭，改用扫码登录后直接使用 Cookie（web 态）即可。
+
+==========================================================================================
+VideoApi
+==========================================================================================
+
+接口/方法：getVideoDetails
+Java 方法：public VideoModel getVideoDetails() throws IOException
+URL：https://api.bilibili.com/x/web-interface/view?bvid={bvid} 或 ?aid={aid}    ← 替换
+旧 URL：https://app.bilibili.com/x/v2/view                                     【废弃】需 App 私有签名，-400
+HTTP：GET
+【状态】替换
+【鉴权】文档标需 WBI；实测 aid/bvid 直传未带 WBI 也 code=0（建议仍按 WBI 流程实现以备风控）
+【实测】旧端 → code=-400；新端 → code=0 返回完整 data
+
+接口/方法：likeVideo
+Java 方法：public String likeVideo(int mode) throws IOException  //1好评，2取消差评，3差评，4取消差评
+URL：https://api.bilibili.com/x/web-interface/archive/like
+HTTP：POST
+请求参数：aid={aid}&like={mode}&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+接口/方法：coinVideo
+Java 方法：public String coinVideo(int how) throws IOException
+URL：https://api.bilibili.com/x/web-interface/coin/add
+HTTP：POST
+请求参数：aid={aid}&multiply={how}&cross_domain=true&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+接口/方法：favVideo
+Java 方法：public String favVideo(String favId) throws IOException
+URL：https://api.bilibili.com/x/v3/fav/resource/deal                 ← 替换（收藏操作）
+URL：https://api.bilibili.com/x/web-interface/archive/like/triple    ← 沿用（一键三连）
+旧 URL：https://api.bilibili.com/medialist/gateway/coll/resource/deal 【废弃】返回 -401
+HTTP：POST
+请求参数：收藏 rid={aid}&type=2&add_media_ids={favId}&del_media_ids=&csrf={bili_jct}
+          三连 aid={aid}&csrf={bili_jct}
+【状态】替换（medialist → v3）；triple 沿用
+【鉴权】Cookie + CSRF；v3 收藏端还需 WBI 签名
+【实测】旧 medialist → -401；triple → -101；新 v3 deal → -101
+
+接口/方法：playLater
+Java 方法：public String playLater() throws IOException
+URL：https://api.bilibili.com/x/v2/history/toview/add
+HTTP：POST
+请求参数：aid={aid}&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+接口/方法：playHistory
+Java 方法：public String playHistory() throws IOException
+URL：https://api.bilibili.com/x/report/web/heartbeat
+HTTP：POST
+请求参数：aid={aid}&cid={cid}&mid={mid}&csrf={bili_jct}&played_time=0&realtime=0
+          &start_ts={now}&type=3&dt=2&play_type=1
+【状态】沿用
+【鉴权】Cookie + CSRF（实测无 Cookie 也 code=0）
+
+接口/方法：shareVideo
+Java 方法：public String shareVideo(String text) throws IOException
+URL：https://api.vc.bilibili.com/dynamic_repost/v1/dynamic_repost/share
+HTTP：POST
+请求参数：csrf_token={bili_jct}&platform=pc&uid={up_mid}&type=8&share_uid={mid}&content={text}
+          &repost_code=20000&rid={aid}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+接口/方法：scoreVideo
+Java 方法：public String scoreVideo(int score) throws IOException
+URL：https://api.bilibili.com/x/stein/mark
+HTTP：POST
+请求参数：aid={aid}&mark={score}&csrf={bili_jct}
+【状态】沿用（端点存活）
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+【注意】x/stein 实为互动视频（Steins;Gate 分支）的分支标记接口，不是通用"视频评分"——
+        源码包装为 scoreVideo 存在语义误解，如无互动视频需求可移除。
+
+==========================================================================================
+WatchLaterApi
+==========================================================================================
+
+接口/方法：getWatchLater
+Java 方法：public ArrayList<ListVideoModel> getWatchLater() throws IOException
+URL：https://api.bilibili.com/x/v2/history/toview/web     ← 沿用（列表）
+等价：https://api.bilibili.com/x/v2/history/toview        （新库使用的无 /web 版本，GET 只读）
+HTTP：GET
+【状态】沿用
+【鉴权】Cookie（匿名 -101）
+【实测】→ code=-101
+
+接口/方法：delWatchLater
+Java 方法：public String delWatchLater(String aid) throws IOException
+URL：https://api.bilibili.com/x/v2/history/toview/del
+HTTP：POST
+请求参数：aid={aid}&csrf={bili_jct}
+【状态】沿用
+【鉴权】Cookie + CSRF
+【实测】→ code=-101
+
+==========================================================================================
+2026 年新增鉴权要点（最容易踩坑，总结）
+==========================================================================================
+
+1. WBI 签名（w_rid + wts）已强制覆盖：
+   - x/space/wbi/acc/info（用户信息）—— 签名+凭据两者都要
+   - x/space/wbi/arc/search（用户投稿）—— 签名+凭据两者都要
+   - x/relation/followers（粉丝列表）—— 签名+凭据
+   - x/polymer/web-dynamic/v1/feed/space（空间动态）—— 签名
+   - x/v3/fav/resource/deal（收藏操作）—— 签名
+   - 注意不对称：x/relation/followings 未强制 WBI；wbi/search/all/v2 与 wbi/search/type
+     实测不强制签名（文档标注过时）
+   - 密钥来源：GET /x/web-interface/nav → data.wbi_img.img_url/sub_url 文件名 → 混淆表取32位
+     签名实现：wts=时间戳 + 参数按 key 排序 + md5(query+mixinKey) → w_rid
+
+2. buvid3 设备指纹（Cookie）：
+   - 涉及端点：x/web-interface/popular/series/one 等（裸调 -352）
+   - 获取：GET https://api.bilibili.com/x/frontend/finger/spi → data.b_3 → 写入 Cookie buvid3
+
+3. 风控 -352 常见原因：缺 buvid3 / UA 或 Referer 形状不对（如 ranking 用站根 Referer）/
+   请求头 Accept 用文档型而非 application/json, text/plain, */*
+
+4. 域名迁移总览：
+   - 动态读取：api.vc.bilibili.com/dynamic_svr/* → api.bilibili.com/x/polymer/web-dynamic/v1/*
+     （写入仍留 vc 域）
+   - 收藏体系：space.bilibili.com/ajax/fav/* + medialist/gateway/coll/* + x/space/fav/arc
+     → x/v3/fav/*（folder/created/list-all、folder/info、resource/list、resource/deal）
+   - 番剧详情：pgc/view/app/season → pgc/view/web/season
+   - 视频信息：app.bilibili.com/x/v2/view → x/web-interface/view
+   - 用户空间：app.bilibili.com/x/v2/space → x/space/wbi/acc/info
+   - 登录：passport qrcode 旧双端 → x/passport-login/web/qrcode/generate+poll；
+     TV 密码登录 v3/oauth2 通道关闭无替代；login/app/third 关闭
+
+==========================================================================================
+附录：本次核对来源的 GitHub 新库（BiliBili-API-main）额外可用端点（非原清单，供参考）
+==========================================================================================
+
+- GET https://api.bilibili.com/x/web-interface/view/detail 视频一站式（详情+标签+相关推荐+UP主概览+1条热评）
+- GET https://api.bilibili.com/x/player/online/total?bvid=&cid= 在线观看数（匿名可用，注意返回字符串数字）
+- GET https://api.bilibili.com/x/web-interface/card?mid= 用户名片（匿名可用）
+- GET https://api.bilibili.com/x/space/upstat?mid= UP主累计数据（需凭据；匿名 code=0 但 data 为空，别用外层码判）
+- GET https://api.bilibili.com/x/relation/stat?vmid= 关注/粉丝数（匿名可用，仅数量）
+- GET https://api.bilibili.com/x/web-interface/search/square?limit= 热搜方块（匿名可用，榜单在 data.trending.list）
+- GET https://api.bilibili.com/x/v3/fav/folder/info?media_id= 单个收藏夹信息（公开夹匿名可读）
+- GET https://api.bilibili.com/x/polymer/web-dynamic/v1/opus/detail?id= 图文动态详情（OPUS schema，画长图用）
+- GET https://api.bilibili.com/x/polymer/web-space/seasons_archives_list 合集稿件列表（免签名免登录）
+- GET https://api.bilibili.com/x/emote/user/panel/web?business=reply 表情面板
+- GET https://api.bilibili.com/x/passport-login/web/cookie/info 查询凭据是否需要刷新（路径必须有 /web/）
+- GET https://api.bilibili.com/x/passport-login/captcha?source=main_web 极验验证码前置（无法纯代码完成）
+- POST https://api.bilibili.com/x/passport-login/web/login 网页密码登录（RSA+极验，凭据走 Set-Cookie）
+- POST https://api.bilibili.com/x/passport-login/web/sms/send + /login/sms 短信登录（需极验+手机收码）
+- GET https://api.live.bilibili.com/room/v1/Room/get_info?room_id= 直播间信息
+- GET https://api.live.bilibili.com/room/v1/Room/playUrl 直播流地址（匿名可用）
+- GET https://api.live.bilibili.com/live_user/v1/Master/info?uid= 主播信息
+- GET https://api.live.bilibili.com/room/v1/Area/getList 直播分区
+
+==========================================================================================
+附：若个别接口（如 LotteryApi）无法通过文档/实测确认，可用的 Frida 运行时脱壳兜底方案
+==========================================================================================
+
+1. 设备（手表/手机）运行 frida-server（需 root 或模拟器）：
+   adb push frida-server-<ver>-android-arm64 /data/local/tmp/frida-server
+   adb shell "chmod 755 /data/local/tmp/frida-server && /data/local/tmp/frida-server &"
+2. PC 端安装：pip install frida frida-tools frida-dexdump objection
+3. 一键脱壳：frida-dexdump -U -f cn.luern0313.wristbilibili
+4. 深度抓取：frida -U -f cn.luern0313.wristbilibili -l dump_dex.js --no-pause
+   （hook art::DexFile::OpenMemory / dvmJarFileOpen_stub / find_dexfile，把内存中 DEX 写盘）
+5. 直接抓真实请求：hook java.net.URL / okhttp3.RealCall.execute，打印 url 与参数
+6. jadx 反编译 dump 出的 dex，全局搜索 api.bilibili.com / passport.bilibili.com 即可拿到
+   4.6 加密壳内的精确接口全集。
+
+*更新时间：2026-09-23 | 数据基于 curl 实测 + 镜像文档 + BiliBili-API-main（esdllm）交叉验证*
+*接口状态可能随 B 站官方调整而变化，建议定期复测；WBI/buvid3 等风控要求优先以实测为准*

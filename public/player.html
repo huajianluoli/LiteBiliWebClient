@@ -1,0 +1,2180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>B站视频解析器</title>
+    <style>
+        :root {
+            --header-h: 60px;
+            /* 顶栏背景与顶栏图标色互为反色：深色主题 黑底 + 白图标；接入浅色主题时两者一起对调 */
+            --header-bg: #000000;
+            --header-icon-color: #ffffff;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #000000;
+            color: #ffffff;
+            margin: 0;
+            padding: calc(var(--header-h) + 32px) 20px 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h2 {
+            color: #ffffff;
+            font-weight: 400;
+            letter-spacing: 2px;
+            margin-bottom: 30px;
+        }
+        .container {
+            width: 100%;
+            max-width: 850px;
+        }
+
+        /* ============ 顶栏（不透明、固定，不随页面滚动） ============ */
+        .site-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            height: var(--header-h);
+            background: var(--header-bg);
+            border-bottom: 1px solid #1a1a1a;
+            color: var(--header-icon-color);
+        }
+        /* 顶栏图标（右侧图标群 + 搜索按钮）统一为"与背景相反的颜色"。
+           除了设置 color，还强制 stroke/fill 跟随 currentColor，避免个别 SVG 自带颜色而不一致。 */
+        .site-header .user-icon svg,
+        .site-header .header-search-box button svg {
+            color: var(--header-icon-color);
+        }
+        .site-header .user-icon svg [stroke]:not([stroke="none"]),
+        .site-header .header-search-box button svg [stroke]:not([stroke="none"]) {
+            stroke: currentColor;
+        }
+        .site-header .user-icon svg [fill]:not([fill="none"]) {
+            fill: currentColor;
+        }
+        .header-inner {
+            max-width: 1400px;
+            height: 100%;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            flex-shrink: 0;
+            white-space: nowrap;
+            user-select: none;
+            color: #FB7299;
+            text-decoration: none;
+        }
+        .logo-svg {
+            display: block;
+            height: 26px;
+            width: auto;
+            color: #FB7299;
+        }
+        .logo-svg path { fill: #FB7299; }
+        .top-nav {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+        .top-nav-item {
+            display: inline-flex;
+            align-items: center;
+            height: 32px;
+            padding: 0 12px;
+            border: none;
+            background: none;
+            border-radius: 8px;
+            color: #dddddd;
+            font-size: 14px;
+            font-family: inherit;
+            font-weight: 500;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background .15s ease, color .15s ease;
+        }
+        .top-nav-item:hover {
+            background: rgba(255, 255, 255, .08);
+            color: #ffffff;
+        }
+        .top-nav-item.active {
+            color: #ffffff;
+            font-weight: 650;
+        }
+        .header-search-wrap {
+            position: relative;
+            flex: 1 1 auto;
+            min-width: 0;
+            max-width: 420px;
+            margin: 0 auto;
+        }
+        .header-search-box {
+            display: flex;
+            width: 100%;
+            height: 38px;
+            background: #141414;
+            border-radius: 19px;
+            overflow: hidden;
+            border: 1px solid #232323;
+            transition: border-color .15s ease;
+        }
+        .header-search-box:focus-within {
+            border-color: #3a3a3a;
+        }
+        .header-search-box input {
+            flex: 1;
+            min-width: 0;
+            border: none;
+            outline: none;
+            padding: 0 16px;
+            font-size: 13px;
+            color: #ffffff;
+            background: transparent;
+        }
+        .header-search-box input::placeholder { color: #666666; }
+        .header-search-box button {
+            border: none;
+            background: #FB7299;
+            color: #fff;
+            padding: 0 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            transition: filter .15s ease;
+        }
+        .header-search-box button:hover { background: #FB7299; color: #fff; filter: brightness(.94); }
+        .user-actions {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+        .user-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            border: none;
+            background: none;
+            border-radius: 50%;
+            padding: 0;
+            color: var(--header-icon-color);
+            font-family: inherit;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background .15s ease, color .15s ease;
+        }
+        .user-icon:hover {
+            background: rgba(255, 255, 255, .08);
+            color: var(--header-icon-color);
+        }
+        .user-icon svg { display: block; }
+        .login-btn {
+            height: 32px;
+            padding: 0 16px;
+            border-radius: 16px;
+            background: #FB7299;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            transition: filter .15s ease;
+        }
+        .login-btn:hover { filter: brightness(.94); }
+        .avatar-btn {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border-radius: 50%;
+            overflow: hidden;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #222222;
+            color: #ffffff;
+            font-weight: 600;
+            font-size: 13px;
+            text-decoration: none;
+        }
+        .avatar-btn img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        /* ============ 原有页面内容 ============ */
+        #videoTitle {
+            flex: 1;
+            min-width: 0;
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+            line-height: 1.4;
+            color: #ffffff;
+            word-break: break-all;
+        }
+        /* 视频发布时间（位于大标题下方） */
+        .video-meta-line {
+            font-size: 12px;
+            color: #888888;
+            margin: 0 0 10px;
+            letter-spacing: .3px;
+        }
+        /* 视频描述区 */
+        .desc-box {
+            width: 100%;
+            margin: 0 0 12px;
+        }
+        .desc-text {
+            font-size: 12px;
+            color: #dddddd;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .desc-text.collapsed {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .desc-toggle {
+            display: inline-block;
+            margin-top: 6px;
+            padding: 0;
+            background: none;
+            border: none;
+            color: #888888;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .desc-toggle:hover {
+            background: none;
+            color: #ffffff;
+        }
+        /* 播放器容器 */
+        .player-wrap {
+            position: relative;
+            width: 100%;
+        }
+        #videoPlayer {
+            width: 100%;
+            height: 450px;
+            border: 1px solid #222222;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000000;
+            display: block;
+        }
+        /* 解析栏 */
+        .parse-row {
+            margin-top: 25px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            width: 100%;
+            flex-wrap: wrap;
+        }
+        .player-actions {
+            display: none;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .player-actions.show { display: flex; }
+        .player-action-btn {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid #292929;
+            background: #141414;
+            color: #ffffff;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background .15s ease, color .15s ease, border-color .15s ease;
+        }
+        .player-action-btn svg { flex-shrink: 0; }
+        .player-action-btn:hover {
+            background: #1f1f1f;
+            border-color: #3a3a3a;
+        }
+        .player-action-btn.like.active { color: #FB7299; border-color: #FB7299; }
+        .player-action-btn.coin.active { color: #FFC83D; border-color: #FFC83D; }
+        .player-action-btn.fav.active { color: #00AEEC; border-color: #00AEEC; }
+
+        /* UP 主关注组件（头像 + 名字/关注按钮） */
+        .up-follow {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .up-follow.show { display: flex; }
+        .up-avatar-link {
+            display: block;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            overflow: hidden;
+            flex-shrink: 0;
+            background: #1a1a1a;
+            border: 1px solid #222222;
+            text-decoration: none;
+            transition: border-color .15s ease;
+        }
+        .up-avatar-link:hover { border-color: #555555; }
+        .up-avatar-link img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .up-info {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 2px;
+            height: 40px;
+            min-width: 0;
+        }
+        .up-name {
+            font-size: 11px;
+            color: #bbbbbb;
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 96px;
+        }
+        .follow-btn {
+            padding: 0 10px;
+            height: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            background: #FB7299;
+            color: #ffffff;
+            border: none;
+            border-radius: 999px;
+            cursor: pointer;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: filter .15s ease, background .15s ease, color .15s ease;
+            white-space: nowrap;
+        }
+        .follow-btn:hover { background: #FB7299; color: #ffffff; filter: brightness(.92); }
+        .follow-btn:disabled { opacity: .6; cursor: default; }
+        /* 已关注：灰底 + 深灰字 */
+        .follow-btn.followed,
+        .follow-btn.followed:hover {
+            background: #c8c8c8;
+            color: #4a4a4a;
+            filter: none;
+        }
+        .follow-btn.followed:hover { background: #d6d6d6; }
+
+        /* 解析输入框（宽度压缩，给 UP 主关注组件让位） */
+        .search-box {
+            display: flex;
+            gap: 12px;
+            flex: 1;
+            min-width: 150px;
+        }
+        /* 小标题 */
+        .section-title {
+            font-size: 13px;
+            color: #666666;
+            margin-bottom: 12px;
+            letter-spacing: 1px;
+        }
+        /* 选集控制栏样式 */
+        .episode-box {
+            display: none;
+            margin-top: 25px;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+        }
+        .episode-box.show {
+            display: flex;
+        }
+        /* 分P列表 */
+        .episode-list {
+            display: none;
+            width: 100%;
+            max-height: 240px;
+            overflow-y: auto;
+            border: 1px solid #222222;
+            border-radius: 6px;
+            background: #0a0a0a;
+            scrollbar-color: #333333 #000000;
+        }
+        .episode-list.show {
+            display: block;
+        }
+        .episode-item {
+            padding: 10px 16px;
+            font-size: 14px;
+            color: #aaaaaa;
+            cursor: pointer;
+            border-bottom: 1px solid #1a1a1a;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+        .episode-item:last-child {
+            border-bottom: none;
+        }
+        .episode-item:hover {
+            background: #161616;
+            color: #ffffff;
+        }
+        .episode-item.active {
+            background: #ffffff;
+            color: #000000;
+        }
+        /* 输入框 */
+        input {
+            flex: 1;
+            padding: 12px 16px;
+            background: #000000;
+            border: 1px solid #333333;
+            border-radius: 6px;
+            color: #ffffff;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        input:focus {
+            border-color: #ffffff;
+        }
+        /* 按钮 */
+        button {
+            padding: 12px 30px;
+            background-color: #ffffff;
+            color: #000000;
+            border: 1px solid #ffffff;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s, color 0.2s;
+        }
+        button:hover {
+            background-color: #000000;
+            color: #ffffff;
+        }
+        /* JSON 结果展示区 */
+        .json-box {
+            margin-top: 25px;
+            width: 100%;
+        }
+        #jsonOutput {
+            margin: 0;
+            padding: 16px;
+            background: #0a0a0a;
+            border: 1px solid #222222;
+            border-radius: 6px;
+            color: #cccccc;
+            font-family: "SF Mono", Menlo, Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 260px;
+            overflow-y: auto;
+            scrollbar-color: #333333 #000000;
+        }
+
+        /* 强制覆盖 ArtPlayer 的部分高亮逻辑为纯白极简 */
+        .art-video-player .art-control-playtime {
+            color: #ffffff !important;
+        }
+        .art-video-player .artplayer-plugin-danmuku {
+            font-family: inherit;
+        }
+        video::-webkit-media-controls-panel {
+            background-color: rgba(0, 0, 0, 0.6);
+        }
+        /* 相关推荐 */
+        .related-list {
+            display: none;
+            margin-top: 25px;
+            width: 100%;
+        }
+        .related-list.show {
+            display: block;
+        }
+        .related-scroll {
+            display: flex;
+            gap: 12px;
+            overflow-x: auto;
+            padding-bottom: 6px;
+            scrollbar-color: #333333 #000000;
+        }
+        .related-card {
+            flex: 0 0 180px;
+            width: 180px;
+            cursor: pointer;
+        }
+        .related-thumb {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #111111;
+            border: 1px solid #222222;
+        }
+        .related-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .related-duration {
+            position: absolute;
+            right: 5px;
+            bottom: 5px;
+            background: rgba(0, 0, 0, .7);
+            color: #ffffff;
+            font-size: 10px;
+            padding: 1px 5px;
+            border-radius: 3px;
+        }
+        .related-title {
+            margin: 8px 0 4px;
+            font-size: 13px;
+            line-height: 1.4;
+            height: 2.8em;
+            color: #cccccc;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
+            transition: color 0.15s ease;
+        }
+        .related-card:hover .related-title {
+            color: #ffffff;
+        }
+        .related-meta {
+            font-size: 11px;
+            color: #666666;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .related-card.related-skeleton {
+            cursor: default;
+        }
+        .related-skeleton .related-thumb {
+            background: linear-gradient(90deg, #111111, #1c1c1c, #111111);
+            background-size: 200% 100%;
+            animation: relatedShimmer 1.2s infinite;
+        }
+        @keyframes relatedShimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        .related-empty, .related-error {
+            color: #555555;
+            font-size: 13px;
+            padding: 6px 0;
+        }
+
+        /* ============ 评论区（与其他框对齐：无外框，COMMENT 标题在框外左上角） ============ */
+        .comment-list {
+            display: none;
+            margin-top: 25px;
+            width: 100%;
+        }
+        .comment-list.show { display: block; }
+        .comment-count {
+            color: #555555;
+            font-weight: 400;
+            margin-left: 6px;
+        }
+        /* 发评论输入栏 */
+        .comment-composer {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+        .comment-composer input {
+            flex: 1;
+            min-width: 0;
+        }
+        .comment-composer button {
+            flex-shrink: 0;
+            padding: 0 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        /* 评论滚动区（带边框，视觉上与 JSON 框内层一致） */
+        .comment-scroll {
+            max-height: 460px;
+            overflow-y: auto;
+            border: 1px solid #222222;
+            border-radius: 6px;
+            background: #0a0a0a;
+            padding: 4px 16px;
+            scrollbar-color: #333333 #0a0a0a;
+        }
+        .comment-like-btn {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            border: none;
+            background: none;
+            padding: 0;
+            color: #666666;
+            font-size: 12px;
+            cursor: pointer;
+            transition: color .15s ease;
+        }
+        .comment-like-btn:hover { color: #aaaaaa; background: none; }
+        .comment-like-btn.active { color: #FB7299; }
+        /* 子回复点赞（SVG 风格，与主评论一致） */
+        .sub-reply-like-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            border: none;
+            background: none;
+            padding: 0;
+            color: #666666;
+            font-size: 11px;
+            margin-left: 6px;
+            cursor: pointer;
+            vertical-align: middle;
+            transition: color .15s ease;
+        }
+        .sub-reply-like-btn svg { flex-shrink: 0; display: block; }
+        .sub-reply-like-btn:hover { color: #aaaaaa; background: none; }
+        .sub-reply-like-btn.active { color: #FB7299; }
+        .comment-item {
+            display: flex;
+            gap: 12px;
+            padding: 14px 0;
+            border-bottom: 1px solid #1a1a1a;
+        }
+        .comment-item:last-child { border-bottom: none; }
+        .comment-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            object-fit: cover;
+            background: #1a1a1a;
+            flex-shrink: 0;
+        }
+        .comment-main { flex: 1; min-width: 0; }
+        .comment-user {
+            font-size: 13px;
+            color: #00A1D6;
+            margin-bottom: 4px;
+        }
+        .comment-text {
+            font-size: 14px;
+            color: #eeeeee;
+            line-height: 1.6;
+            word-break: break-word;
+            white-space: pre-wrap;
+        }
+        .comment-meta {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-top: 6px;
+            font-size: 12px;
+            color: #666666;
+        }
+        .comment-replies {
+            margin-top: 10px;
+            padding: 10px 12px;
+            background: #0d0d0d;
+            border-radius: 6px;
+        }
+        .sub-reply {
+            font-size: 13px;
+            line-height: 1.6;
+            color: #bbbbbb;
+            margin-bottom: 6px;
+        }
+        .sub-reply:last-of-type { margin-bottom: 0; }
+        .sub-reply-user {
+            color: #00A1D6;
+            margin-right: 4px;
+        }
+        .sub-reply-like {
+            color: #666666;
+            margin-left: 6px;
+            font-size: 11px;
+        }
+        .reply-toggle {
+            margin-top: 8px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 400;
+            background: transparent;
+            border: 1px solid #333333;
+            color: #999999;
+            border-radius: 4px;
+        }
+        .reply-toggle:hover {
+            background: transparent;
+            color: #ffffff;
+            border-color: #666666;
+        }
+        /* 评论区底部提示：登录提示 / 加载中 / 没有更多 / 失败重试 */
+        .comment-footer {
+            text-align: center;
+            padding: 14px 0 10px;
+            font-size: 13px;
+            color: #666666;
+        }
+        .comment-footer a { color: inherit; text-decoration: none; cursor: pointer; }
+        .comment-footer.login,
+        .comment-footer.login a { color: #FB7299; }
+        .comment-footer.login a:hover { text-decoration: underline; }
+        .comment-footer.error a { color: #aaaaaa; }
+        .comment-footer.error a:hover { color: #ffffff; }
+        .comment-empty, .comment-error {
+            color: #555555;
+            font-size: 13px;
+            padding: 6px 0;
+        }
+        .comment-skeleton {
+            height: 60px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            background: linear-gradient(90deg, #111111, #1c1c1c, #111111);
+            background-size: 200% 100%;
+            animation: relatedShimmer 1.2s infinite;
+        }
+
+        /* ============ 响应式 ============ */
+        @media (max-width: 900px) {
+            .top-nav { display: none; }
+            .header-search-wrap { display: none; }
+        }
+        @media (max-width: 640px) {
+            :root { --header-h: 56px; }
+            body { padding: calc(var(--header-h) + 20px) 14px 40px; }
+            .header-inner { padding: 0 14px; gap: 10px; }
+            .logo-svg { height: 22px; }
+            .user-actions { gap: 0; }
+            .user-icon { width: 32px; height: 32px; }
+            .user-actions .user-icon:not(.always-show) { display: none; }
+            .avatar-btn { width: 30px; height: 30px; }
+            #videoPlayer { height: 260px; }
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/artplayer/5.1.7/artplayer.js"></script>
+    <script src="https://unpkg.com/artplayer-plugin-danmuku@5/dist/artplayer-plugin-danmuku.js"></script>
+</head>
+<body>
+
+    <!-- ============ 顶栏（不透明、固定） ============ -->
+    <header class="site-header">
+        <div class="header-inner">
+            <a class="logo" href="/search" title="首页" aria-label="bilibili">
+                <svg class="logo-svg" viewBox="0 0 52 24" xmlns="http://www.w3.org/2000/svg">
+                    <path fill="currentColor" fill-rule="evenodd" d="M46.573 20.632c-.215 0-.398.017-.577-.004-.364-.042-.729-.034-1.093-.044-.236-.007-.229-.007-.248-.235-.059-.696-.123-1.392-.185-2.088-.054-.611-.105-1.223-.165-1.834-.054-.56-.12-1.117-.178-1.676-.057-.526-.109-1.052-.167-1.576-.074-.66-.15-1.32-.23-1.98-.07-.583-.14-1.168-.218-1.75-.122-.903-.248-1.805-.376-2.707a79.498 79.498 0 00-.474-2.873c-.03-.171-.026-.177.137-.205.679-.116 1.361-.215 2.052-.2.074.002.15.004.224.013.121.015.184.074.191.216.024.494.059.987.095 1.48.058.808.121 1.616.181 2.423.039.52.072 1.038.11 1.557.063.833.13 1.666.192 2.499.039.51.072 1.02.111 1.53.06.748.125 1.495.186 2.242.038.476.072.952.113 1.428.06.705.124 1.41.185 2.114.046.55.087 1.102.134 1.67zM20.291 3.468c.1 0 .25-.011.398.002.188.018.224.066.236.256.054.868.105 1.736.163 2.605.063.936.132 1.871.201 2.806.064.859.128 1.717.196 2.576.075.943.158 1.885.233 2.829.058.722.106 1.445.165 2.168.056.671.122 1.34.183 2.011.05.577.103 1.154.153 1.732.016.183.003.195-.194.19-.515-.013-1.027-.073-1.542-.059-.118.004-.152-.05-.172-.163-.043-.244-.036-.492-.062-.739-.07-.652-.111-1.307-.17-1.961-.054-.594-.119-1.187-.18-1.78-.054-.543-.107-1.085-.165-1.628-.058-.533-.119-1.067-.179-1.6-.055-.491-.11-.982-.169-1.473-.087-.719-.173-1.438-.268-2.156-.087-.659-.185-1.315-.278-1.973a77.866 77.866 0 00-.425-2.674 30.006 30.006 0 00-.114-.602c-.02-.101-.002-.16.113-.175.303-.041.605-.104.91-.134.304-.028.609-.085.967-.058zm21.565 8.668c.58 0 .594.004.687.527.115.646.195 1.297.271 1.948.08.694.161 1.387.235 2.082.06.559.11 1.12.166 1.678.06.586.122 1.17.183 1.755.033.33.065.661.102.991.011.096-.017.146-.111.157-.199.023-.395.05-.593.07-.362.04-.725.078-1.087.112-.188.017-.2.007-.235-.175-.318-1.646-.637-3.291-.952-4.939-.21-1.095-.414-2.19-.62-3.286-.028-.15-.053-.302-.077-.453-.014-.087.01-.143.108-.166.653-.153 1.313-.271 1.923-.301zm-24.373 0c.62 0 .618.002.714.567.148.873.253 1.752.347 2.633.091.856.192 1.71.282 2.565.06.586.108 1.172.165 1.756.04.416.089.831.133 1.246.005.051.008.102.011.154.01.203 0 .22-.195.24-.387.04-.776.074-1.163.112-.14.014-.28.035-.42.048-.185.017-.191.017-.227-.17-.13-.66-.257-1.32-.384-1.98-.306-1.588-.615-3.175-.92-4.763-.12-.636-.225-1.274-.344-1.91-.022-.116-.006-.17.114-.198.648-.152 1.3-.27 1.887-.3zm8.19 6.66v2.665c0 .025-.002.051.002.077.012.13-.035.186-.168.18-.175-.007-.348-.002-.523.002-.365.007-.73-.008-1.095.034-.201.024-.197.011-.217-.202-.06-.67-.125-1.341-.186-2.012-.056-.62-.107-1.24-.164-1.86-.058-.637-.124-1.273-.183-1.91-.04-.424-.076-.848-.111-1.273-.047-.553-.09-1.105-.139-1.658-.02-.233-.003-.266.227-.29a11.356 11.356 0 011.79-.056c.15.009.297.038.441.073.182.043.202.07.212.26.02.384.04.768.05 1.152.011.427.002.854.017 1.281.04 1.178.034 2.357.048 3.536zm24.325.12v2.524c0 .043-.001.085.001.129.009.11-.043.15-.147.149-.258-.002-.515 0-.772.003-.291.003-.581.002-.871.033-.192.022-.193.008-.21-.183l-.242-2.622c-.072-.807-.14-1.614-.213-2.421-.077-.833-.16-1.663-.234-2.495a84.78 84.78 0 01-.1-1.25c-.011-.182.008-.214.213-.23.355-.029.709-.077 1.067-.07.356.006.714-.014 1.068.054.3.058.316.075.333.397.052.947.036 1.896.07 2.843.034 1.008.01 2.016.037 3.14zm-8.747-11.36c.21.012.375.002.54.038.104.024.157.072.167.184.05.543.103 1.086.157 1.63.043.44.09.88.134 1.321l.004.026c.036.277.028.285-.242.3-.24.013-.48.034-.72.049-.157.01-.207.036-.233-.194-.09-.813-.194-1.623-.294-2.435a25.338 25.338 0 00-.092-.683c-.02-.13.03-.2.15-.21.158-.015.316-.019.429-.026zm-24.295.003c.162.01.329-.003.492.034.093.022.14.061.15.168.02.254.058.508.082.762.076.78.148 1.561.22 2.342.015.17.011.174-.147.185-.281.021-.563.042-.845.053-.164.008-.184-.012-.205-.18-.071-.575-.138-1.15-.207-1.726-.055-.474-.102-.948-.17-1.421-.018-.13.025-.167.129-.188.165-.034.331-.023.501-.029zm8.556 2.15v1.482c0 .222-.003.224-.224.221a6.928 6.928 0 01-.792-.041c-.17-.022-.174-.016-.179-.197-.017-.604-.035-1.209-.047-1.813-.009-.409-.014-.817-.038-1.226-.013-.21-.002-.213.2-.216.299-.003.597.01.893.056.178.028.186.028.187.226l.001 1.508h-.001zm24.337.012v1.484c0 .208-.004.21-.212.208a10.826 10.826 0 01-.817-.039c-.136-.01-.175-.067-.166-.19v-.052c-.02-.954-.042-1.908-.06-2.862-.001-.05-.004-.102-.002-.153.003-.193.003-.198.196-.196.265.001.529.015.793.041.323.032.266.072.268.328v1.431zm-33.559 1.16c.007.272.007.272-.253.335-.176.043-.352.09-.53.13-.151.034-.178.015-.204-.134l-.541-3.038c-.036-.21-.027-.222.179-.259.253-.044.505-.088.758-.128.161-.025.182-.016.214.162.064.36.124.72.172 1.083.073.573.133 1.149.2 1.723.005.042.003.085.005.127zM39.1 7.945c.331-.054.665-.11 1-.162.12-.019.156.057.171.164.057.396.129.79.175 1.186.069.575.163 1.147.18 1.726l.003.18c.003.091-.043.139-.128.159-.226.05-.453.102-.678.156-.108.026-.145-.02-.163-.126-.067-.403-.146-.804-.215-1.205-.117-.662-.231-1.324-.345-1.986-.003-.024 0-.05 0-.092zm-15.232 2.322c-.01.352.011.659-.037.965-.014.097-.042.16-.146.169-.224.018-.447.036-.67.059-.107.011-.137-.035-.155-.141-.05-.313-.04-.63-.071-.944-.057-.594-.081-1.191-.12-1.786-.009-.145-.023-.29-.035-.434-.006-.081.026-.127.112-.13.29-.012.578-.065.869-.054.17.006.184.017.196.189.008.119.006.239.009.359l.048 1.748zm24.326-.341c0 .41.005.82 0 1.23-.004.212-.028.23-.229.25-.199.018-.396.033-.594.054-.112.012-.164-.02-.171-.15-.029-.544-.068-1.088-.106-1.632-.03-.451-.063-.902-.094-1.352-.004-.052-.001-.103-.004-.154-.005-.09.022-.143.123-.146.281-.01.56-.064.843-.054.173.006.176.009.189.189.042.587.046 1.176.043 1.765zM15.46 17.249c.355.392.373.856.256 1.341-.118.486-.387.886-.713 1.245-.546.6-1.207 1.042-1.909 1.418a13.319 13.319 0 01-3.827 1.333 22.16 22.16 0 01-2.91.376c-.298.016-.595.03-.893.028-.216 0-.433.006-.648-.002-.184-.006-.21-.038-.225-.23-.056-.688-.103-1.377-.164-2.065-.072-.798-.155-1.595-.232-2.392-.056-.577-.105-1.155-.167-1.73-.071-.678-.151-1.355-.23-2.033-.07-.626-.14-1.252-.215-1.879-.084-.694-.171-1.386-.264-2.078-.09-.667-.185-1.333-.283-1.999-.16-1.095-.333-2.189-.521-3.28a69.862 69.862 0 00-.507-2.66c-.025-.118.01-.165.114-.208.992-.413 1.981-.833 2.973-1.248.184-.077.373-.141.57-.178.135-.025.17.003.166.14-.01.35.004.701-.03 1.05a3.478 3.478 0 00-.014.281c-.016 1.255-.03 2.51.002 3.766.03 1.1.087 2.199.15 3.298.05.868.122 1.736.197 2.602.072.849.16 1.697.244 2.546.015.161.03.176.213.152.36-.055.725-.085 1.09-.09 1.133-.003 2.248.153 3.35.415.966.23 1.904.536 2.804.963.446.212.872.457 1.26.767.133.105.251.225.363.351zm24.154-.206c.439.386.598.858.474 1.442-.104.482-.338.887-.651 1.25-.502.582-1.112 1.024-1.771 1.394-1.294.726-2.671 1.198-4.12 1.47-.79.15-1.587.262-2.389.334-.454.04-.91.088-1.419.057h-.595c-.116 0-.182-.037-.192-.175-.043-.603-.094-1.206-.148-1.81-.058-.636-.122-1.273-.182-1.91-.055-.584-.106-1.17-.165-1.756-.055-.551-.118-1.101-.178-1.652-.055-.517-.109-1.034-.17-1.55-.073-.626-.15-1.252-.228-1.877-.073-.584-.145-1.167-.222-1.75-.083-.625-.17-1.25-.261-1.873-.122-.81-.253-1.616-.382-2.423a70.147 70.147 0 00-.624-3.417c-.01-.05-.014-.102-.03-.15-.035-.11 0-.17.107-.212 1.054-.413 2.074-.912 3.138-1.305.139-.052.28-.11.43-.126.135-.013.169.009.156.153-.071.783-.03 1.57-.067 2.354-.03.64-.027 1.28.005 1.92.008.163.014.326.013.488-.009.768.032 1.536.07 2.304.051 1.014.124 2.026.2 3.038.053.731.124 1.46.192 2.19.037.4.076.8.125 1.197.027.219.038.22.253.192a7.627 7.627 0 011.14-.088 15.02 15.02 0 013.95.599c.874.249 1.725.56 2.529.995.362.193.702.427 1.012.697zM8.609 20.83c.496-.237 2.907-2.126 3.098-2.434-1.17-.506-2.344-.975-3.606-1.36l.508 3.794zm27.377-2.31c.061-.067.055-.119-.03-.156-.166-.076-.331-.157-.5-.227-.9-.369-1.805-.726-2.732-1.018-.081-.025-.164-.081-.268-.033l.5 3.728c.074.016.103-.018.136-.041.843-.62 1.69-1.233 2.5-1.9.136-.111.272-.224.394-.353z"/>
+                </svg>
+            </a>
+
+            <nav class="top-nav">
+                <a class="top-nav-item active" href="/search">首页</a>
+                <button type="button" class="top-nav-item" data-placeholder="直播">直播</button>
+            </nav>
+
+            <div class="header-search-wrap">
+                <form class="header-search-box" id="headerSearchForm">
+                    <input id="headerKeyword" type="text" placeholder="搜索你感兴趣的视频" autocomplete="off" />
+                    <button type="submit" aria-label="搜索">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+                            <line x1="16.5" y1="16.5" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                </form>
+            </div>
+
+            <div class="user-actions" id="userActions">
+                <a class="login-btn" id="loginEntry" href="/account">登录</a>
+
+                <button type="button" class="user-icon" title="动态" data-placeholder="动态">
+                    <svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+                            <path id="icon-blade-dynamic" d="M12,12 A5,5 0 0 1 12,2 Z"/>
+                            <use href="#icon-blade-dynamic" transform="rotate(90 12 12)"/>
+                            <use href="#icon-blade-dynamic" transform="rotate(180 12 12)"/>
+                            <use href="#icon-blade-dynamic" transform="rotate(270 12 12)"/>
+                        </g>
+                    </svg>
+                </button>
+
+                <button type="button" class="user-icon" title="消息" data-placeholder="消息">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.6"/>
+                        <path d="M4 7l8 5 8-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                    </svg>
+                </button>
+
+                <a class="user-icon" href="/account?tab=fav" title="收藏">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7L12 3.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                    </svg>
+                </a>
+
+                <a class="user-icon" href="/account?tab=history" title="历史">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
+                        <path d="M12 7v5l3.5 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                    </svg>
+                </a>
+
+                <button type="button" class="user-icon always-show" title="设置" data-placeholder="设置">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>
+                        <path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.5-2-3.5-2.4.6a7.4 7.4 0 0 0-1.7-1L14.8 3h-4l-.5 2.6a7.4 7.4 0 0 0-1.7 1l-2.4-.6-2 3.5L6.2 11a7.6 7.6 0 0 0 0 2l-2 1.5 2 3.5 2.4-.6a7.4 7.4 0 0 0 1.7 1l.5 2.6h4l.5-2.6a7.4 7.4 0 0 0 1.7-1l2.4.6 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- 视频标题 -->
+        <p id="videoTitle"></p>
+
+        <!-- 视频发布时间（大标题下方） -->
+        <div class="video-meta-line" id="videoPubdate" style="display:none;"></div>
+
+        <!-- 视频描述(默认折叠,可展开/收起) -->
+        <div class="desc-box" id="descBox" style="display:none;">
+            <div class="desc-text collapsed" id="descText"></div>
+            <button class="desc-toggle" id="descToggle" onclick="toggleDesc()">展开</button>
+        </div>
+
+        <!-- ArtPlayer 播放器容器 -->
+        <div class="player-wrap">
+            <div id="videoPlayer"></div>
+        </div>
+
+        <!-- 解析栏：左侧点赞/投币/收藏 + UP 主关注 + 右侧 BV/AV 号输入 -->
+        <div class="parse-row">
+            <div class="player-actions" id="playerActions">
+                <button class="player-action-btn like" id="likeActionBtn" onclick="doLike()" title="点赞">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3Zm0 0l4.5-8a2 2 0 0 1 3.5 1.5V9h4.2a2 2 0 0 1 1.97 2.3l-1.1 7A2 2 0 0 1 18.1 20H10a3 3 0 0 1-3-3v-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                    </svg>
+                    <span id="likeCount">-</span>
+                </button>
+                <button class="player-action-btn coin" id="coinActionBtn" onclick="doCoin()" title="投币">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
+                        <text x="12" y="16" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor">币</text>
+                    </svg>
+                    <span id="coinCount">-</span>
+                </button>
+                <button class="player-action-btn fav" id="favActionBtn" onclick="doFavorite()" title="收藏">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7L12 3.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                    </svg>
+                    <span id="favCount">-</span>
+                </button>
+            </div>
+
+            <!-- UP 主关注组件（头像 + 名字 + 关注+） -->
+            <div class="up-follow" id="upFollow">
+                <a class="up-avatar-link" id="upAvatarLink" href="javascript:void(0)" title="UP主主页">
+                    <img id="upAvatarImg" src="" alt="" referrerpolicy="no-referrer" />
+                </a>
+                <div class="up-info">
+                    <div class="up-name" id="upName"></div>
+                    <button class="follow-btn" id="followBtn" type="button">关注+</button>
+                </div>
+            </div>
+
+            <div class="search-box">
+                <input type="text" id="vidInput" placeholder="输入 BV 号 或 AV 号" onkeydown="if(event.key === 'Enter'){ startPlay(); }">
+                <button onclick="startPlay()">解析</button>
+            </div>
+        </div>
+
+        <!-- 选集(仅多P视频显示) -->
+        <div class="episode-box" id="episodeBox">
+            <div class="section-title">EPISODES</div>
+        </div>
+
+        <!-- 分P列表 -->
+        <div class="episode-list" id="episodeList"></div>
+
+        <!-- 相关推荐 -->
+        <div class="related-list" id="relatedBox">
+            <div class="section-title">RELATED</div>
+            <div class="related-scroll" id="relatedScroll"></div>
+        </div>
+
+        <!-- 评论区（与其他框对齐，COMMENT 标题在框外左上角） -->
+        <div class="comment-list" id="commentBox">
+            <div class="section-title">COMMENT<span class="comment-count" id="commentCount"></span></div>
+            <div class="comment-composer">
+                <input type="text" id="commentInput" placeholder="发一条友善的评论" maxlength="200" onkeydown="if(event.key === 'Enter'){ sendComment(); }">
+                <button onclick="sendComment()" id="sendCommentBtn">发送</button>
+            </div>
+            <div class="comment-scroll" id="commentScroll"></div>
+        </div>
+
+        <!-- JSON 结果展示区 -->
+        <div class="json-box">
+            <div class="section-title">JSON RESPONSE</div>
+            <pre id="jsonOutput">等待解析...</pre>
+        </div>
+    </div>
+
+    <script>
+        // —— 主题切换接口（暂未接入设置页，先留好） ——
+        window.setTheme = function(theme) {
+            // 目前只实现了深色主题；后续在设置页中接入 light 主题时，在这里扩展 CSS 变量即可。
+            document.documentElement.setAttribute('data-theme', theme || 'dark');
+            try { localStorage.setItem('bili_theme', theme || 'dark'); } catch (e) {}
+        };
+        (function initTheme() {
+            let saved = 'dark';
+            try { saved = localStorage.getItem('bili_theme') || 'dark'; } catch (e) {}
+            window.setTheme(saved);
+        })();
+
+        // —— 令牌会话：WebView/iframe 等 Cookie 不可靠环境下仍可保持登录 ——
+        let _sidMem = '';
+        let _buvid3Mem = '';
+        try {
+            _sidMem = sessionStorage.getItem('bili_sid') || localStorage.getItem('bili_sid') || '';
+            _buvid3Mem = sessionStorage.getItem('bili_buvid3') || localStorage.getItem('bili_buvid3') || '';
+        } catch (e) {}
+
+        function _setSid(sid) {
+            _sidMem = sid || '';
+            try {
+                if (sid) { sessionStorage.setItem('bili_sid', sid); localStorage.setItem('bili_sid', sid); }
+                else { sessionStorage.removeItem('bili_sid'); localStorage.removeItem('bili_sid'); }
+            } catch (e) {}
+        }
+        function _setBuvid3(b) {
+            _buvid3Mem = b || '';
+            try {
+                if (b) { sessionStorage.setItem('bili_buvid3', b); localStorage.setItem('bili_buvid3', b); }
+                else { sessionStorage.removeItem('bili_buvid3'); localStorage.removeItem('bili_buvid3'); }
+            } catch (e) {}
+        }
+
+        const _origFetch = window.fetch.bind(window);
+        window.fetch = (input, opts) => {
+            opts = opts || {};
+            if (opts.headers instanceof Headers) {
+                if (_sidMem) opts.headers.set('X-Bili-Session', _sidMem);
+                if (_buvid3Mem) opts.headers.set('X-Bili-Buvid3', _buvid3Mem);
+            } else {
+                opts.headers = Object.assign({}, opts.headers);
+                if (_sidMem) opts.headers['X-Bili-Session'] = _sidMem;
+                if (_buvid3Mem) opts.headers['X-Bili-Buvid3'] = _buvid3Mem;
+            }
+            return _origFetch(input, opts);
+        };
+
+        // —— 简单 toast ——
+        function showToast(text) {
+            let t = document.getElementById('__toast');
+            if (!t) {
+                t = document.createElement('div');
+                t.id = '__toast';
+                t.style.cssText = 'position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(20px);background:rgba(24,25,28,.92);color:#fff;font-size:14px;padding:10px 18px;border-radius:8px;z-index:2000;opacity:0;pointer-events:none;transition:opacity .2s ease,transform .2s ease;white-space:nowrap;';
+                document.body.appendChild(t);
+            }
+            t.textContent = text;
+            requestAnimationFrame(() => {
+                t.style.opacity = '1';
+                t.style.transform = 'translateX(-50%) translateY(0)';
+            });
+            clearTimeout(t.__timer);
+            t.__timer = setTimeout(() => {
+                t.style.opacity = '0';
+                t.style.transform = 'translateX(-50%) translateY(20px)';
+            }, 1800);
+        }
+
+        // —— 顶栏：搜索表单 ——
+        document.getElementById('headerSearchForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const kw = document.getElementById('headerKeyword').value.trim();
+            if (!kw) return;
+            location.href = '/search?kw=' + encodeURIComponent(kw);
+        });
+
+        // —— 顶栏：占位按钮 toast ——
+        document.querySelectorAll('.site-header [data-placeholder]').forEach(el => {
+            el.addEventListener('click', () => {
+                showToast((el.dataset.placeholder || '该功能') + '功能开发中，敬请期待');
+            });
+        });
+
+        // —— 顶栏：登录态检测（结果同时供评论区 / 关注按钮使用） ——
+        let isLoggedIn = false;
+        let myMid = 0;
+        const authReady = (async function checkHeaderLogin() {
+            try {
+                const r = await fetch('/api/me');
+                const d = await r.json();
+                if (d.loggedIn && d.user) {
+                    isLoggedIn = true;
+                    myMid = Number(d.user.mid) || 0;
+                    const loginEntry = document.getElementById('loginEntry');
+                    if (!loginEntry) return;
+                    const face = d.user.face || '';
+                    const uname = d.user.uname || '';
+                    const a = document.createElement('a');
+                    a.className = 'avatar-btn';
+                    a.href = '/account';
+                    a.title = uname;
+                    if (face) {
+                        const img = document.createElement('img');
+                        img.src = face.startsWith('//') ? 'https:' + face : face;
+                        img.referrerPolicy = 'no-referrer';
+                        img.alt = uname;
+                        a.appendChild(img);
+                    } else {
+                        a.textContent = uname.slice(0, 1) || '我';
+                    }
+                    loginEntry.replaceWith(a);
+                }
+            } catch (e) {}
+        })();
+
+        let currentPage = 1;
+
+        // 登录后把直链播放器的播放进度同步回 B 站历史。
+        let historyState = { aid: 0, cid: 0, lastSent: 0, finished: false };
+
+        async function sendHistoryHeartbeat(finished = false) {
+            if (!historyState.aid || !historyState.cid || !art || !art.video) return;
+            const t = Math.floor(art.video.currentTime || 0);
+            if (!finished && t <= 0) return;
+            if (!finished && t - historyState.lastSent < 15) return;
+            historyState.lastSent = t;
+
+            try {
+                await fetch('/api/history/heartbeat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        aid: historyState.aid,
+                        cid: historyState.cid,
+                        played_time: t,
+                        finished: finished
+                    }),
+                    keepalive: finished
+                });
+            } catch (e) {}
+        }
+
+        let currentAid = 0;
+        let currentBvid = '';
+        let videoStat = { like: null, coin: null, favorite: null };
+        let videoRelation = { liked: false, coin: 0, favorite: false };
+
+        // 当前 UP 主信息（用于关注按钮跳转/关注）
+        let currentUpMid = 0;
+
+        function esc(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+        }
+
+        // 统一的时间格式化：YYYY-MM-DD HH:mm
+        function formatDateTime(ts) {
+            if (ts == null || ts === '') return '';
+            let d;
+            if (typeof ts === 'number') d = new Date(ts * 1000);
+            else if (/^\d+$/.test(String(ts))) d = new Date(Number(ts) * 1000);
+            else d = new Date(ts);
+            if (isNaN(d.getTime())) return '';
+            const y = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            const hh = String(d.getHours()).padStart(2, '0');
+            const mi = String(d.getMinutes()).padStart(2, '0');
+            return `${y}-${mm}-${dd} ${hh}:${mi}`;
+        }
+
+        function renderEpisodeBox(pages, activePage) {
+            const episodeBox = document.getElementById('episodeBox');
+            const episodeList = document.getElementById('episodeList');
+
+            if (!pages || pages.length <= 1) {
+                episodeBox.classList.remove('show');
+                episodeList.classList.remove('show');
+                episodeList.innerHTML = '';
+                return;
+            }
+
+            episodeBox.classList.add('show');
+            episodeList.classList.add('show');
+
+            episodeList.innerHTML = '';
+            pages.forEach((item) => {
+                const el = document.createElement('div');
+                el.className = 'episode-item' + (item.page === activePage ? ' active' : '');
+                el.textContent = `P${item.page}  ${item.part}`;
+                el.onclick = () => {
+                    currentPage = item.page;
+                    startPlay();
+                };
+                episodeList.appendChild(el);
+            });
+        }
+
+        function toggleDesc() {
+            const descText = document.getElementById('descText');
+            const descToggle = document.getElementById('descToggle');
+            const collapsed = descText.classList.toggle('collapsed');
+            descToggle.textContent = collapsed ? '展开' : '收起';
+        }
+
+        /* ----------------------------- UP 主关注 ----------------------------- */
+
+        let upFollowed = false;
+
+        function setFollowState(followed) {
+            upFollowed = !!followed;
+            const btn = document.getElementById('followBtn');
+            btn.classList.toggle('followed', upFollowed);
+            btn.textContent = upFollowed ? '已关注' : '关注+';
+        }
+
+        // 查询当前登录用户是否已关注该 UP 主；自己的视频不显示关注按钮。
+        async function loadFollowState(mid) {
+            await authReady;
+            if (mid !== currentUpMid) return;
+            const btn = document.getElementById('followBtn');
+            if (isLoggedIn && myMid && myMid === Number(mid)) {
+                btn.style.display = 'none';
+                return;
+            }
+            if (!isLoggedIn) return;
+            try {
+                const res = await fetch(`/api/relation?mid=${encodeURIComponent(mid)}`);
+                const d = await res.json();
+                if (mid !== currentUpMid) return;
+                setFollowState(!!d.following);
+            } catch (e) {}
+        }
+
+        function renderUpFollow(data) {
+            const box = document.getElementById('upFollow');
+            const nameEl = document.getElementById('upName');
+            const imgEl = document.getElementById('upAvatarImg');
+            const linkEl = document.getElementById('upAvatarLink');
+            const followBtn = document.getElementById('followBtn');
+
+            if (!data || !data.author) {
+                box.classList.remove('show');
+                currentUpMid = 0;
+                return;
+            }
+
+            const mid = data.mid || 0;
+            const face = data.face || '';
+            currentUpMid = mid;
+
+            nameEl.textContent = data.author;
+            nameEl.title = data.author;
+
+            if (face) {
+                imgEl.src = face.startsWith('//') ? 'https:' + face : face;
+                imgEl.style.display = '';
+            } else {
+                imgEl.removeAttribute('src');
+                imgEl.style.display = 'none';
+            }
+
+            // 点头像跳转 UP 主主页（account.html 支持通过 ?mid= 查看别人的主页）
+            linkEl.href = mid ? `/account?mid=${encodeURIComponent(mid)}` : 'javascript:void(0)';
+            linkEl.title = mid ? `${data.author} 的主页` : data.author;
+
+            // 先重置为"未关注"，再异步查询真实关注状态
+            followBtn.style.display = '';
+            setFollowState(false);
+
+            box.classList.add('show');
+            if (mid) loadFollowState(mid);
+        }
+
+        // 关注 / 取消关注
+        document.getElementById('followBtn').addEventListener('click', async () => {
+            if (!currentUpMid) {
+                showToast('UP 主信息不完整，无法关注');
+                return;
+            }
+            const btn = document.getElementById('followBtn');
+            if (btn.disabled) return;
+            const mid = currentUpMid;
+            const willFollow = !upFollowed;
+            if (!willFollow) {
+                const name = document.getElementById('upName').textContent;
+                if (!confirm(`确定不再关注「${name}」吗？`)) return;
+            }
+            btn.disabled = true;
+            try {
+                const res = await fetch('/api/follow', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fid: mid, act: willFollow ? 1 : 2 }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (mid !== currentUpMid) return; // 请求期间已切换到别的视频
+                if (!res.ok) {
+                    showToast(data.error || (willFollow ? '关注失败' : '取消关注失败'));
+                    if (data.code === -101 || data.code === -111) {
+                        setTimeout(() => location.href = '/account', 1500);
+                    }
+                    return;
+                }
+                setFollowState(willFollow);
+                showToast(willFollow ? '关注成功' : '已取消关注');
+            } catch (err) {
+                showToast('操作失败：' + (err.message || '网络异常'));
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        /* ----------------------------- 点赞 / 投币 / 收藏 ----------------------------- */
+
+        function renderPlayerActions() {
+            const box = document.getElementById('playerActions');
+            if (!currentAid) {
+                box.classList.remove('show');
+                return;
+            }
+            box.classList.add('show');
+            document.getElementById('likeCount').textContent = formatRelatedCount(videoStat.like);
+            document.getElementById('coinCount').textContent = formatRelatedCount(videoStat.coin);
+            document.getElementById('favCount').textContent = formatRelatedCount(videoStat.favorite);
+            document.getElementById('likeActionBtn').classList.toggle('active', !!videoRelation.liked);
+            document.getElementById('coinActionBtn').classList.toggle('active', videoRelation.coin > 0);
+            document.getElementById('favActionBtn').classList.toggle('active', !!videoRelation.favorite);
+        }
+
+        async function loadVideoRelation() {
+            if (!currentAid) return;
+            try {
+                const res = await fetch(`/api/video/relation?av=${currentAid}`);
+                const data = await res.json();
+                videoRelation = {
+                    liked: !!data.liked,
+                    coin: data.coin || 0,
+                    favorite: !!data.favorite,
+                };
+            } catch (err) {
+                videoRelation = { liked: false, coin: 0, favorite: false };
+            }
+            renderPlayerActions();
+        }
+
+        async function doLike() {
+            if (!currentAid) return;
+            const nextLiked = !videoRelation.liked;
+            try {
+                const res = await fetch('/api/video/like', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ aid: currentAid, bvid: currentBvid, like: nextLiked }),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    alert(data.error || '点赞失败');
+                    if (data.code === -101 || data.code === -111) {
+                        setTimeout(() => location.href = '/account', 1500);
+                    }
+                    return;
+                }
+                videoRelation.liked = nextLiked;
+                videoStat.like = Math.max(0, (videoStat.like || 0) + (nextLiked ? 1 : -1));
+                renderPlayerActions();
+            } catch (err) {
+                alert('点赞失败：' + (err.message || '网络异常'));
+            }
+        }
+
+        async function doCoin() {
+            if (!currentAid) return;
+            if (videoRelation.coin >= 2) {
+                alert('已经投过 2 个硬币啦，每人最多 2 个~');
+                return;
+            }
+            if (!_sidMem && !document.cookie.includes('bili_session')) {
+                alert('请先登录 B 站账号');
+                location.href = '/account';
+                return;
+            }
+
+            const before = videoRelation.coin;
+            try {
+                const res = await fetch('/api/video/coin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        aid: currentAid,
+                        bvid: currentBvid,
+                        multiply: 1,
+                        select_like: videoRelation.liked,
+                    }),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    alert(data.error || '投币失败');
+                    if (data.code === -101 || data.code === -111) {
+                        setTimeout(() => location.href = '/account', 1500);
+                    }
+                    return;
+                }
+
+                videoRelation.coin = before + 1;
+                videoStat.coin = (videoStat.coin || 0) + 1;
+                renderPlayerActions();
+
+                if (videoRelation.coin === 1) {
+                    alert('已投 1 个硬币，再点一次可投第 2 个~');
+                } else if (videoRelation.coin === 2) {
+                    alert('已投满 2 个硬币，感谢支持！');
+                }
+            } catch (err) {
+                alert('投币失败：' + (err.message || '网络异常'));
+            }
+        }
+
+        async function doFavorite() {
+            if (!currentAid) return;
+            const nextFav = !videoRelation.favorite;
+            try {
+                const res = await fetch('/api/video/favorite', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ aid: currentAid, action: nextFav ? 'add' : 'remove' }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || '收藏失败');
+                videoRelation.favorite = nextFav;
+                videoStat.favorite = (videoStat.favorite || 0) + (nextFav ? 1 : -1);
+                renderPlayerActions();
+            } catch (err) {
+                alert(err.message || '收藏失败,请先登录 B 站账号');
+            }
+        }
+
+        /* ----------------------------- 评论区 ----------------------------- */
+
+        let commentNextCursor = 0;
+        let commentLoading = false;
+        let commentIsEnd = false;
+        const commentRepliesCache = {};
+
+        function formatCommentDate(ts) {
+            return formatDateTime(ts);
+        }
+
+        // 子回复的点赞按钮（与主评论一致，使用 SVG 而非 emoji）
+        function subReplyHTML(sub) {
+            return `
+                <div class="sub-reply">
+                    <span class="sub-reply-user">${esc(sub.uname)}:</span>
+                    <span class="sub-reply-text">${esc(sub.message)}</span>
+                    <button class="sub-reply-like-btn${sub.liked ? ' active' : ''}" data-rpid="${sub.rpid}" data-liked="${sub.liked ? '1' : '0'}">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3Zm0 0l4.5-8a2 2 0 0 1 3.5 1.5V9h4.2a2 2 0 0 1 1.97 2.3l-1.1 7A2 2 0 0 1 18.1 20H10a3 3 0 0 1-3-3v-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                        </svg>
+                        <span class="sub-reply-like-count">${formatRelatedCount(sub.like)}</span>
+                    </button>
+                </div>
+            `;
+        }
+
+        function commentHTML(item) {
+            const shown = (item.replies || []).slice(0, 3);
+            commentRepliesCache[item.rpid] = shown;
+            const hasMore = item.rcount > shown.length;
+
+            const repliesBlock = shown.length ? `
+                <div class="comment-replies" data-root="${item.rpid}" data-expanded="0">
+                    <div class="sub-reply-list">${shown.map(subReplyHTML).join('')}</div>
+                    ${hasMore ? `<button class="reply-toggle" data-root="${item.rpid}" data-total="${item.rcount}">展开全部 ${item.rcount} 条回复</button>` : ''}
+                </div>
+            ` : '';
+
+            return `
+                <div class="comment-item">
+                    <img class="comment-avatar" src="${esc(item.avatar)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.opacity=0" />
+                    <div class="comment-main">
+                        <div class="comment-user">${esc(item.uname)}</div>
+                        <div class="comment-text">${esc(item.message)}</div>
+                        <div class="comment-meta">
+                            <button class="comment-like-btn${item.liked ? ' active' : ''}" data-rpid="${item.rpid}" data-liked="${item.liked ? '1' : '0'}">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3Zm0 0l4.5-8a2 2 0 0 1 3.5 1.5V9h4.2a2 2 0 0 1 1.97 2.3l-1.1 7A2 2 0 0 1 18.1 20H10a3 3 0 0 1-3-3v-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                                </svg>
+                                <span class="comment-like-count-num">${formatRelatedCount(item.like)}</span>
+                            </button>
+                            <span class="comment-time">${formatCommentDate(item.ctime)}</span>
+                        </div>
+                        ${repliesBlock}
+                    </div>
+                </div>
+            `;
+        }
+
+        async function toggleCommentLike(btn) {
+            if (!currentAid) return;
+            const rpid = btn.dataset.rpid;
+            const wasLiked = btn.dataset.liked === '1';
+            const nextLiked = !wasLiked;
+            const countEl = btn.querySelector('.comment-like-count-num, .sub-reply-like-count');
+            const prevCount = countEl ? countEl.textContent : '';
+            try {
+                const res = await fetch('/api/comments/like', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ aid: currentAid, rpid, like: nextLiked }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || '操作失败');
+                btn.dataset.liked = nextLiked ? '1' : '0';
+                btn.classList.toggle('active', nextLiked);
+                const rawPrev = parseInt(prevCount, 10);
+                if (!isNaN(rawPrev) && countEl) {
+                    countEl.textContent = formatRelatedCount(rawPrev + (nextLiked ? 1 : -1));
+                }
+            } catch (err) {
+                alert(err.message || '点赞失败,请先登录 B 站账号');
+            }
+        }
+
+        async function sendComment() {
+            if (!currentAid) { alert('请先解析一个视频'); return; }
+            const input = document.getElementById('commentInput');
+            const message = input.value.trim();
+            if (!message) return;
+            const btn = document.getElementById('sendCommentBtn');
+            btn.disabled = true;
+            const originalText = btn.textContent;
+            btn.textContent = '发送中…';
+            try {
+                const res = await fetch('/api/comments/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ aid: currentAid, message }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || '发送失败');
+                input.value = '';
+                const scroll = document.getElementById('commentScroll');
+                if (data.reply) {
+                    const empty = scroll.querySelector('.comment-empty');
+                    if (empty) empty.remove();
+                    scroll.insertAdjacentHTML('afterbegin', commentHTML(data.reply));
+                } else if (currentBvid || currentAid) {
+                    loadComments('av', currentAid);
+                }
+            } catch (err) {
+                alert(err.message || '发送失败,请先登录 B 站账号');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+
+        function commentSkeletonHTML(count) {
+            return Array.from({ length: count }).map(() => `<div class="comment-skeleton"></div>`).join('');
+        }
+
+        let commentSeq = 0;         // 切换视频后丢弃过期的评论请求
+        let commentFailed = false;  // 自动加载失败后停止自动重试，等用户点"重试"
+
+        // 评论滚动区底部的提示行（始终保持在最后一个子节点）
+        function setCommentFooter(kind) {
+            const scroll = document.getElementById('commentScroll');
+            let f = document.getElementById('commentFooter');
+            if (!kind) {
+                if (f) f.remove();
+                return;
+            }
+            if (!f) {
+                f = document.createElement('div');
+                f.id = 'commentFooter';
+            }
+            f.className = 'comment-footer ' + kind;
+            if (kind === 'login') f.innerHTML = '<a href="/account">登录后查看更多评论</a>';
+            else if (kind === 'loading') f.textContent = '加载中…';
+            else if (kind === 'end') f.textContent = '没有更多评论了';
+            else if (kind === 'error') f.innerHTML = '<a id="commentRetry">加载失败，点击重试</a>';
+            scroll.appendChild(f);
+        }
+
+        // 已登录时：评论区滚到底部自动加载下一页
+        function maybeLoadMoreComments() {
+            if (!isLoggedIn || commentLoading || commentIsEnd || commentFailed || !currentAid) return;
+            const el = document.getElementById('commentScroll');
+            if (el.scrollTop + el.clientHeight >= el.scrollHeight - 120) loadMoreComments();
+        }
+
+        async function loadComments(paramType, cleanId) {
+            const box = document.getElementById('commentBox');
+            const scroll = document.getElementById('commentScroll');
+            const countEl = document.getElementById('commentCount');
+
+            const seq = ++commentSeq;
+            box.classList.add('show');
+            scroll.innerHTML = commentSkeletonHTML(4);
+            countEl.textContent = '';
+            commentNextCursor = 0;
+            commentIsEnd = false;
+            commentLoading = false;
+            commentFailed = false;
+
+            try {
+                const url = `/api/comments?${paramType}=${encodeURIComponent(cleanId)}&next=0`;
+                // 同时等登录态，保证渲染页脚时已知道是否登录
+                const [res] = await Promise.all([fetch(url), authReady]);
+                const data = await res.json();
+                if (seq !== commentSeq) return;
+
+                if (!res.ok) {
+                    scroll.innerHTML = `<div class="comment-error">${data.error || '评论加载失败,请稍后再试'}</div>`;
+                    return;
+                }
+
+                if (!data.list || data.list.length === 0) {
+                    scroll.innerHTML = `<div class="comment-empty">暂无评论,快来抢沙发吧</div>`;
+                    return;
+                }
+
+                countEl.textContent = `(${formatRelatedCount(data.count)})`;
+                scroll.innerHTML = data.list.map(commentHTML).join('');
+                commentNextCursor = data.next;
+                commentIsEnd = data.isEnd;
+
+                if (!isLoggedIn) {
+                    // 未登录：B 站只放出前几条评论
+                    const hasMore = !data.isEnd || (data.count || 0) > data.list.length;
+                    setCommentFooter(hasMore ? 'login' : 'end');
+                } else if (commentIsEnd) {
+                    setCommentFooter('end');
+                } else {
+                    maybeLoadMoreComments(); // 首屏没填满评论区时继续加载
+                }
+            } catch (err) {
+                if (seq !== commentSeq) return;
+                scroll.innerHTML = `<div class="comment-error">评论加载失败,请稍后再试</div>`;
+            }
+        }
+
+        async function loadMoreComments() {
+            if (commentLoading || commentIsEnd || !currentAid || !isLoggedIn) return;
+            commentLoading = true;
+            commentFailed = false;
+            const seq = commentSeq;
+            setCommentFooter('loading');
+
+            try {
+                const res = await fetch(`/api/comments?av=${currentAid}&next=${commentNextCursor}`);
+                const data = await res.json();
+                if (seq !== commentSeq) return;
+                if (res.ok) {
+                    if (data.list && data.list.length) {
+                        setCommentFooter(null);
+                        document.getElementById('commentScroll').insertAdjacentHTML('beforeend', data.list.map(commentHTML).join(''));
+                        commentNextCursor = data.next;
+                        commentIsEnd = data.isEnd;
+                    } else {
+                        commentIsEnd = true; // 空页视为到底，避免反复请求
+                    }
+                } else {
+                    commentFailed = true;
+                }
+            } catch (err) {
+                if (seq === commentSeq) commentFailed = true;
+            } finally {
+                if (seq === commentSeq) {
+                    commentLoading = false;
+                    if (commentFailed) setCommentFooter('error');
+                    else if (commentIsEnd) setCommentFooter('end');
+                    else {
+                        setCommentFooter(null);
+                        requestAnimationFrame(maybeLoadMoreComments);
+                    }
+                }
+            }
+        }
+
+        document.getElementById('commentScroll').addEventListener('scroll', maybeLoadMoreComments, { passive: true });
+
+        document.getElementById('commentScroll').addEventListener('click', async (e) => {
+            if (e.target.closest('#commentRetry')) {
+                loadMoreComments();
+                return;
+            }
+            const likeBtn = e.target.closest('.comment-like-btn, .sub-reply-like-btn');
+            if (likeBtn) {
+                toggleCommentLike(likeBtn);
+                return;
+            }
+
+            const btn = e.target.closest('.reply-toggle');
+            if (!btn || !currentAid) return;
+
+            const root = btn.dataset.root;
+            const container = btn.closest('.comment-replies');
+            const listEl = container.querySelector('.sub-reply-list');
+            const expanded = container.dataset.expanded === '1';
+
+            if (expanded) {
+                const original = commentRepliesCache[root] || [];
+                listEl.innerHTML = original.map(subReplyHTML).join('');
+                container.dataset.expanded = '0';
+                btn.textContent = `展开全部 ${btn.dataset.total} 条回复`;
+                return;
+            }
+
+            btn.textContent = '加载中…';
+            try {
+                const res = await fetch(`/api/comments/replies?av=${currentAid}&root=${encodeURIComponent(root)}&pn=1`);
+                const data = await res.json();
+                if (res.ok && data.list && data.list.length) {
+                    listEl.innerHTML = data.list.map(subReplyHTML).join('');
+                    container.dataset.expanded = '1';
+                    btn.textContent = '收起';
+                } else {
+                    btn.textContent = `展开全部 ${btn.dataset.total} 条回复`;
+                }
+            } catch (err) {
+                btn.textContent = `展开全部 ${btn.dataset.total} 条回复`;
+            }
+        });
+
+        /* ----------------------------- 相关推荐 ----------------------------- */
+
+        function formatRelatedCount(n) {
+            if (n == null) return '';
+            if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, '') + '万';
+            return String(n);
+        }
+
+        function formatRelatedDuration(sec) {
+            const total = parseInt(sec, 10) || 0;
+            const h = Math.floor(total / 3600);
+            const m = Math.floor((total % 3600) / 60);
+            const s = total % 60;
+            if (h > 0) {
+                return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+            }
+            return `${m}:${String(s).padStart(2, '0')}`;
+        }
+
+        function relatedSkeletonHTML(count) {
+            return Array.from({ length: count }).map(() => `
+                <div class="related-card related-skeleton">
+                    <div class="related-thumb"></div>
+                </div>
+            `).join('');
+        }
+
+        function relatedCardHTML(item) {
+            const safeTitle = (item.title || '').replace(/"/g, '&quot;');
+            const metaParts = [];
+            if (item.author) metaParts.push(item.author);
+            if (item.play != null) metaParts.push(`${formatRelatedCount(item.play)}播放`);
+
+            return `
+                <div class="related-card" data-bvid="${item.bvid}">
+                    <div class="related-thumb">
+                        <img src="${item.pic}" loading="lazy" alt="" referrerpolicy="no-referrer" onerror="this.style.opacity=0" />
+                        <span class="related-duration">${formatRelatedDuration(item.duration)}</span>
+                    </div>
+                    <p class="related-title" title="${safeTitle}">${item.title || ''}</p>
+                    <div class="related-meta">${metaParts.join(' · ')}</div>
+                </div>
+            `;
+        }
+
+        async function loadRelated(paramType, cleanId) {
+            const relatedBox = document.getElementById('relatedBox');
+            const relatedScroll = document.getElementById('relatedScroll');
+
+            relatedBox.classList.add('show');
+            relatedScroll.innerHTML = relatedSkeletonHTML(8);
+
+            try {
+                const url = `/api/related?${paramType}=${encodeURIComponent(cleanId)}`;
+                const res = await fetch(url);
+                const data = await res.json();
+
+                if (!res.ok || !data.list || data.list.length === 0) {
+                    relatedScroll.innerHTML = `<div class="related-empty">暂无相关推荐</div>`;
+                    return;
+                }
+
+                relatedScroll.innerHTML = data.list.map(relatedCardHTML).join('');
+            } catch (err) {
+                relatedScroll.innerHTML = `<div class="related-error">相关推荐加载失败,请稍后再试</div>`;
+            }
+        }
+
+        document.getElementById('relatedScroll').addEventListener('click', (e) => {
+            const card = e.target.closest('.related-card');
+            if (!card || !card.dataset.bvid) return;
+
+            document.getElementById('vidInput').value = card.dataset.bvid;
+            currentPage = 1;
+            startPlay();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+
+        function renderDescBox(desc) {
+            const descBox = document.getElementById('descBox');
+            const descText = document.getElementById('descText');
+            const descToggle = document.getElementById('descToggle');
+
+            if (!desc || !desc.trim()) {
+                descBox.style.display = 'none';
+                descText.textContent = '';
+                return;
+            }
+
+            descBox.style.display = 'block';
+            descText.textContent = desc;
+            descText.classList.add('collapsed');
+            descToggle.textContent = '展开';
+            descToggle.style.display = 'none';
+
+            requestAnimationFrame(() => {
+                const isOverflowing = descText.scrollHeight > descText.clientHeight;
+                descToggle.style.display = isOverflowing ? 'inline-block' : 'none';
+            });
+        }
+
+        let art = null;
+
+        let dashAudio = null;
+        let currentPlayInfo = null;   // 记住当前播放信息，供降级时使用
+        let currentDanmakuList = null;
+        let dashFallbackTriggered = false;
+
+        // —— 弹幕设置持久化（localStorage）：开关 / 透明度 / 速度 / 字号 / 显示区域 / 类型屏蔽等 ——
+        const DM_STORE_KEY = 'bili_danmaku_settings';
+        const DM_DEFAULTS = {
+            speed: 7.5,
+            opacity: 0.75,
+            fontSize: 20,
+            margin: [10, '75%'],
+            antiOverlap: true,
+            synchronousPlayback: false,
+            visible: true,
+        };
+
+        function sanitizeDanmakuSettings(s) {
+            const o = {};
+            if (!s || typeof s !== 'object') return o;
+            if (typeof s.opacity === 'number' && s.opacity >= 0 && s.opacity <= 1) o.opacity = s.opacity;
+            if (typeof s.speed === 'number' && s.speed > 0) o.speed = s.speed;
+            if ((typeof s.fontSize === 'number' && s.fontSize > 0) ||
+                (typeof s.fontSize === 'string' && s.fontSize.trim())) o.fontSize = s.fontSize;
+            if (Array.isArray(s.margin) && s.margin.length === 2) o.margin = s.margin;
+            if (Array.isArray(s.modes) && s.modes.every((n) => typeof n === 'number')) o.modes = s.modes;
+            ['antiOverlap', 'synchronousPlayback', 'visible'].forEach((k) => {
+                if (typeof s[k] === 'boolean') o[k] = s[k];
+            });
+            return o;
+        }
+
+        function loadDanmakuSettings() {
+            try {
+                const raw = localStorage.getItem(DM_STORE_KEY);
+                return sanitizeDanmakuSettings(raw ? JSON.parse(raw) : null);
+            } catch (e) {
+                return {};
+            }
+        }
+
+        // 只合并传入的字段，不会因为某次只改了一项而丢掉其它设置
+        function saveDanmakuSettings(patch) {
+            try {
+                const merged = Object.assign({}, loadDanmakuSettings(), sanitizeDanmakuSettings(patch));
+                localStorage.setItem(DM_STORE_KEY, JSON.stringify(merged));
+            } catch (e) {}
+        }
+
+        function getDanmakuPlugin() {
+            return art && art.plugins ? art.plugins.artplayerPluginDanmuku : null;
+        }
+
+        // 读取插件当前配置并保存。opt 为插件 config 事件带出的配置（没有则读插件的 option）
+        function snapshotDanmakuSettings(opt) {
+            try {
+                const dm = getDanmakuPlugin();
+                const src = (opt && typeof opt === 'object') ? opt : ((dm && dm.option) || {});
+                const patch = {};
+                ['opacity', 'speed', 'fontSize', 'margin', 'modes', 'antiOverlap', 'synchronousPlayback'].forEach((k) => {
+                    if (src[k] !== undefined) patch[k] = src[k];
+                });
+                if (dm && typeof dm.isHide === 'boolean') patch.visible = !dm.isHide;
+                saveDanmakuSettings(patch);
+            } catch (e) {}
+        }
+
+        const dashAudioErrorHandler = () => fallbackToDurl('audio error');
+
+        function destroyDashAudio() {
+            if (dashAudio) {
+                try { dashAudio.pause(); } catch (e) {}
+                // 先摘掉错误监听再清空 src：空 src 会让旧音频元素触发 error 事件，
+                // 若不在销毁前移除监听，切到下一个视频时会把新视频也误降级成 720P
+                dashAudio.removeEventListener('error', dashAudioErrorHandler);
+                dashAudio.src = '';
+                dashAudio = null;
+            }
+        }
+
+        // DASH 音频加载失败时：销毁当前播放器，用 720P 兜底从原进度继续
+        function fallbackToDurl(reason) {
+            if (dashFallbackTriggered) return;
+            if (!currentPlayInfo || !currentPlayInfo.fallbackUrl) {
+                console.warn('DASH 失败且无兜底地址，无法降级:', reason);
+                return;
+            }
+            dashFallbackTriggered = true;
+
+            const resumeAt = art ? art.currentTime : 0;
+            const wasMuted = art ? art.muted : false;
+            const prevVolume = art ? art.volume : 1;
+            const wasPlaying = art ? !art.paused : false;
+
+            console.warn('DASH 播放失败，自动降级到 720P:', reason);
+
+            // 用 durl 重新初始化
+            initPlayer(
+                { url: currentPlayInfo.fallbackUrl, quality: 64, accept_quality: [], accept_description: [] },
+                currentDanmakuList || []
+            );
+
+            // 恢复进度 / 音量 / 播放状态
+            if (art && art.video) {
+                const restore = () => {
+                    try {
+                        if (resumeAt > 0) art.currentTime = resumeAt;
+                        art.muted = wasMuted;
+                        art.volume = prevVolume;
+                        if (wasPlaying) art.play().catch(() => {});
+                    } catch (e) {}
+                    art.video.removeEventListener('loadedmetadata', restore);
+                };
+                if (art.video.readyState >= 1) restore();
+                else art.video.addEventListener('loadedmetadata', restore);
+            }
+        }
+
+        function initPlayer(playInfo, danmakuList) {
+            if (art) {
+                art.destroy(false);
+                art = null;
+            }
+            destroyDashAudio();
+
+            // 记住本次播放信息，供 fallbackToDurl 使用
+            currentPlayInfo = playInfo;
+            currentDanmakuList = danmakuList || [];
+            dashFallbackTriggered = false;
+
+            const isDash = !!(playInfo.dash && playInfo.dash.video);
+            // 非 DASH 时兼容两种来源：显式 url（降级时）或 fallbackUrl（纯 durl 视频）
+            const videoUrl = isDash ? playInfo.dash.video : (playInfo.url || playInfo.fallbackUrl);
+
+            const dmOpt = Object.assign({}, DM_DEFAULTS, loadDanmakuSettings());
+
+            art = new Artplayer({
+                container: '#videoPlayer',
+                url: videoUrl,
+                autoplay: false,
+                autoSize: false,
+                autoMini: false,
+                setting: true,
+                playbackRate: true,
+                fullscreen: true,
+                fullscreenWeb: true,
+                pip: true,
+                screenshot: true,
+                theme: '#ffffff',
+                moreVideoAttr: { crossOrigin: 'anonymous' },
+                plugins: [
+                    artplayerPluginDanmuku({
+                        danmuku: currentDanmakuList,
+                        ...dmOpt,
+                        color: '#ffffff',
+                        mode: 0,
+                        heatmap: false,
+                        emitter: false,
+                    }),
+                ],
+            });
+
+            art.on('error', (err) => {
+                console.warn('播放器加载出错:', err);
+                // 视频流本身失败 → 触发降级
+                if (isDash) fallbackToDurl('video error');
+            });
+
+            // DASH：创建隐藏的 Audio 同步音频流
+            if (isDash && playInfo.dash.audio) {
+                dashAudio = new Audio(playInfo.dash.audio);
+                dashAudio.preload = 'auto';
+                dashAudio.crossOrigin = 'anonymous';
+
+                // 音频加载失败 → 触发降级
+                dashAudio.addEventListener('error', dashAudioErrorHandler);
+
+                art.on('play', () => {
+                    if (!dashAudio) return;
+                    dashAudio.currentTime = art.currentTime;
+                    dashAudio.play().catch(() => {});
+                });
+                art.on('pause', () => {
+                    if (dashAudio) dashAudio.pause();
+                });
+                art.on('video:seeked', () => {
+                    if (dashAudio) dashAudio.currentTime = art.currentTime;
+                });
+                art.on('video:volumechange', () => {
+                    if (!dashAudio) return;
+                    dashAudio.volume = art.volume;
+                    dashAudio.muted = art.muted;
+                });
+                art.on('video:ratechange', () => {
+                    if (!dashAudio) return;
+                    dashAudio.playbackRate = art.playbackRate;
+                });
+                art.on('video:ended', () => {
+                    if (dashAudio) { dashAudio.pause(); dashAudio.currentTime = 0; }
+                });
+
+                // 额外保险：若 5 秒内音频仍未 canplay，视为加载失败
+                let audioReady = false;
+                dashAudio.addEventListener('canplay', () => { audioReady = true; });
+                setTimeout(() => {
+                    if (!audioReady && dashAudio && isDash && !dashFallbackTriggered) {
+                        fallbackToDurl('audio timeout');
+                    }
+                }, 5000);
+            }
+
+            // 弹幕设置持久化（与之前一致）
+            const applySavedVisible = () => {
+                try {
+                    const dm = getDanmakuPlugin();
+                    if (dm && dmOpt.visible === false && !dm.isHide) dm.hide();
+                } catch (e) {}
+            };
+            applySavedVisible();
+            art.on('ready', applySavedVisible);
+            art.on('artplayerPluginDanmuku:config', snapshotDanmakuSettings);
+            art.on('artplayerPluginDanmuku:hide', () => saveDanmakuSettings({ visible: false }));
+            art.on('artplayerPluginDanmuku:show', () => saveDanmakuSettings({ visible: true }));
+
+            const dmRoot = art.template && art.template.$player;
+            if (dmRoot) {
+                let dmTimer = null;
+                const scheduleSnapshot = () => {
+                    clearTimeout(dmTimer);
+                    dmTimer = setTimeout(() => snapshotDanmakuSettings(), 400);
+                };
+                ['pointerup', 'change', 'input'].forEach((ev) => dmRoot.addEventListener(ev, scheduleSnapshot));
+            }
+
+            if (art.video) {
+                art.video.addEventListener('timeupdate', () => sendHistoryHeartbeat(false));
+                art.video.addEventListener('ended', () => sendHistoryHeartbeat(true));
+            }
+        }
+
+        async function fetchDanmaku(cid) {
+            if (!cid) return [];
+            try {
+                const res = await fetch(`/api/danmaku?cid=${encodeURIComponent(cid)}`);
+                if (!res.ok) return [];
+                const data = await res.json();
+                return Array.isArray(data.list) ? data.list : [];
+            } catch (err) {
+                console.warn('弹幕加载失败:', err);
+                return [];
+            }
+        }
+
+        async function startPlay() {
+            const input = document.getElementById('vidInput').value.trim();
+            const p = currentPage || 1;
+
+            if (!input) {
+                alert('请输入有效的视频号！');
+                return;
+            }
+
+            let paramType = input.toLowerCase().startsWith('av') ? 'av' : 'bv';
+            let cleanId = input.replace(/av/i, '');
+
+            const apiUrl = `/api/play?${paramType}=${cleanId}&p=${p}`;
+            const infoUrl = `/api/info?${paramType}=${cleanId}`;
+
+            fetch(infoUrl)
+                .then((r) => r.json())
+                .then((data) => {
+                    document.getElementById('videoTitle').textContent =
+                        data.code === 0 ? data.title : '';
+
+                    // 视频发布时间（需要 /api/info 返回 pubdate 字段）
+                    const pubEl = document.getElementById('videoPubdate');
+                    if (data.code === 0 && data.pubdate) {
+                        pubEl.textContent = formatDateTime(data.pubdate);
+                        pubEl.style.display = 'block';
+                    } else {
+                        pubEl.textContent = '';
+                        pubEl.style.display = 'none';
+                    }
+
+                    renderDescBox(data.code === 0 ? data.desc : '');
+                    renderEpisodeBox(data.code === 0 ? data.pages : [], p);
+
+                    // UP 主信息（mid / face 需要 /api/info 返回；缺失时按钮仍显示但无法跳转）
+                    renderUpFollow(data.code === 0 ? {
+                        author: data.author,
+                        mid: data.mid || data.owner?.mid || 0,
+                        face: data.face || data.owner?.face || '',
+                    } : null);
+
+                    currentAid = data.code === 0 ? (data.aid || 0) : 0;
+                    currentBvid = data.code === 0 ? (data.bvid || '') : '';
+                    videoStat = data.code === 0 ? (data.stat || {}) : {};
+                    videoRelation = { liked: false, coin: 0, favorite: false };
+                    renderPlayerActions();
+                    loadVideoRelation();
+                })
+                .catch(() => {
+                    document.getElementById('videoTitle').textContent = '';
+                    const pubEl = document.getElementById('videoPubdate');
+                    pubEl.textContent = '';
+                    pubEl.style.display = 'none';
+                    renderDescBox('');
+                    renderEpisodeBox([], p);
+                    renderUpFollow(null);
+                    currentAid = 0;
+                    currentBvid = '';
+                    renderPlayerActions();
+                });
+
+            loadRelated(paramType, cleanId);
+            loadComments(paramType, cleanId);
+
+            try {
+                const response = await fetch(apiUrl);
+                let jsonData;
+                try {
+                    jsonData = await response.json();
+                } catch (parseErr) {
+                    throw new Error(`接口返回 HTTP ${response.status}`);
+                }
+
+                document.getElementById('jsonOutput').textContent = JSON.stringify(jsonData, null, 2);
+
+                if (jsonData.code !== 0) {
+                    alert(`解析失败：${jsonData.message || '未知错误'}`);
+                    return;
+                }
+
+                const hasPlayable = !!(
+                    jsonData.url ||
+                    jsonData.fallbackUrl ||
+                    (jsonData.dash && jsonData.dash.video)
+                );
+
+                if (hasPlayable) {
+                    try {
+                        historyState = {
+                            aid: Number(jsonData.aid || 0),
+                            cid: Number(jsonData.cid || 0),
+                            lastSent: 0,
+                            finished: false
+                        };
+                        const danmakuList = await fetchDanmaku(jsonData.cid);
+                        initPlayer(jsonData, danmakuList);
+                    } catch (playerError) {
+                        console.error('播放器初始化失败:', playerError);
+                        alert('播放器初始化失败：' + playerError.message);
+                    }
+                } else {
+                    alert('解析失败：返回结果中缺少可播放的直链');
+                }
+            } catch (error) {
+                console.error('请求接口失败:', error);
+                document.getElementById('jsonOutput').textContent = '请求失败：' + error.message;
+                alert('请求解析接口失败：' + error.message);
+            }
+        }
+
+        window.onload = function() {
+            const params = new URLSearchParams(window.location.search);
+            const bv = params.get('bv');
+            const av = params.get('av');
+            const p = params.get('p');
+
+            if (bv || av) {
+                document.getElementById('vidInput').value = bv || `av${av}`;
+                if (p) currentPage = parseInt(p, 10) || 1;
+                startPlay();
+            }
+        }
+
+        window.addEventListener('pagehide', () => {
+            sendHistoryHeartbeat(false);
+        });
+    </script>
+</body>
+</html>
