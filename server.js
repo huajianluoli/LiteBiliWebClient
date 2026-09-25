@@ -882,21 +882,27 @@ app.get("/api/audio/proxy", async (req, res) => {
   }
 
   try {
-    const upstream = await fetch(target.toString(), {
-      headers: {
-        "User-Agent": COMMON_HEADERS["User-Agent"],
-        Referer: "https://www.bilibili.com/",
-      },
-    });
-    if (!upstream.ok || !upstream.body) {
+    // 关键：把浏览器的 Range 请求头转发给 B 站，并透传 206 / Content-Range /
+    // Accept-Ranges，否则浏览器认为音频流不可 seek，进度条拖不动、拖了也会弹回 0。
+    const upHeaders = {
+      "User-Agent": COMMON_HEADERS["User-Agent"],
+      Referer: "https://www.bilibili.com/",
+    };
+    const range = req.headers.range;
+    if (range) upHeaders["Range"] = range;
+
+    const upstream = await fetch(target.toString(), { headers: upHeaders });
+    if (!upstream.body) {
       return res.status(502).json({ error: "音频拉取失败" });
     }
 
     res.status(upstream.status);
-    const contentType = upstream.headers.get("content-type");
-    const contentLength = upstream.headers.get("content-length");
-    if (contentType) res.setHeader("Content-Type", contentType);
-    if (contentLength) res.setHeader("Content-Length", contentLength);
+    const passthrough = ["content-type", "content-length", "content-range", "accept-ranges"];
+    for (const h of passthrough) {
+      const v = upstream.headers.get(h);
+      if (v) res.setHeader(h, v);
+    }
+    if (!upstream.headers.get("accept-ranges")) res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Cache-Control", "public, max-age=3600");
 
     Readable.fromWeb(upstream.body).pipe(res);
@@ -1297,13 +1303,23 @@ app.get("/api/emotes", async (req, res) => {
 });
 
 // 评论正文里的表情映射：把 [微笑] 这类占位符映射到表情图 URL。
-// B 站返回 content.emoji 数组，每项 text/emoji_name 形如 "[微笑]"，url 是表情图。
+// B 站 reply 返回里表情实际是 content.emote 对象（key 形如 "[doge]"）；
+// 个别新结构可能是 content.emoji 数组，两种都兼容。
 function normalizeReplyEmoji(content) {
   const out = {};
   for (const e of content?.emoji || []) {
     const rawName = e.emoji_name || e.text || "";
     const name = String(rawName).replace(/^\[|\]$/g, "");
     if (name && e.url) out[name] = normalizeImgUrl(e.url);
+  }
+  const emoteObj = content?.emote;
+  if (emoteObj && typeof emoteObj === "object") {
+    for (const [key, e] of Object.entries(emoteObj)) {
+      const rawName = (e && (e.text || e.emoji_name)) || key;
+      const name = String(rawName).replace(/^\[|\]$/g, "");
+      const url = e && e.url;
+      if (name && url && !out[name]) out[name] = normalizeImgUrl(url);
+    }
   }
   return out;
 }
