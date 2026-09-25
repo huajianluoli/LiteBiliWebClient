@@ -148,43 +148,65 @@ async function biliFetch(url, options = {}, session = null) {
   }
 
   if (cookieStr) headers.Cookie = cookieStr;
-  return fetch(url, { ...options, headers });
+  // 关键：手机后端网络抖动时 fetch 默认永不超时，前端会干等几十秒。
+  // 统一 15s 超时，挂了就快速失败让前端降级/重试，而不是死等。
+  const started = Date.now();
+  try {
+    const res = await fetch(url, { ...options, headers, signal: AbortSignal.timeout(15000) });
+    const ms = Date.now() - started;
+    if (ms > 2000) console.warn(`[慢请求 ${ms}ms]`, String(url).slice(0, 120));
+    return res;
+  } catch (e) {
+    const ms = Date.now() - started;
+    console.warn(`[请求失败 ${ms}ms]`, String(url).slice(0, 120), e.message);
+    throw e;
+  }
 }
 
+let ensureCookiePromise = null;
 async function ensureCookie() {
-  const fresh = cachedCookie && Date.now() - cookieFetchedAt < COOKIE_TTL_MS;
-  if (fresh) return cachedCookie;
+  if (cachedCookie && Date.now() - cookieFetchedAt < COOKIE_TTL_MS) return cachedCookie;
+  if (ensureCookiePromise) return ensureCookiePromise; // 并发去重：页面一打开同时发多个请求，只取一次指纹
 
-  const cookies = {};
+  ensureCookiePromise = (async () => {
+    const cookies = {};
 
-  // 显式取设备指纹 buvid3/buvid4（2026 起 popular/series/one 等接口裸调会 -352）
-  try {
-    const r = await fetch("https://api.bilibili.com/x/frontend/finger/spi", {
-      headers: COMMON_HEADERS,
-    });
-    const j = await r.json();
-    if (j.code === 0 && j.data) {
-      if (j.data.b_3) cookies.buvid3 = j.data.b_3;
-      if (j.data.b_4) cookies.buvid4 = j.data.b_4;
-    }
-  } catch {}
-
-  // 再访问首页补齐其它基础 cookie（b_nut 等），已有的不覆盖
-  try {
-    const res = await fetch("https://www.bilibili.com/", { headers: COMMON_HEADERS });
-    for (const c of extractSetCookies(res)) {
-      const first = c.split(";")[0];
-      const i = first.indexOf("=");
-      if (i > 0) {
-        const k = first.slice(0, i);
-        if (!cookies[k]) cookies[k] = first.slice(i + 1);
+    // 显式取设备指纹 buvid3/buvid4（2026 起 popular/series/one 等接口裸调会 -352）
+    try {
+      const r = await fetch("https://api.bilibili.com/x/frontend/finger/spi", {
+        headers: COMMON_HEADERS,
+        signal: AbortSignal.timeout(8000),
+      });
+      const j = await r.json();
+      if (j.code === 0 && j.data) {
+        if (j.data.b_3) cookies.buvid3 = j.data.b_3;
+        if (j.data.b_4) cookies.buvid4 = j.data.b_4;
       }
-    }
-  } catch {}
+    } catch {}
 
-  cachedCookie = cookieHeader(cookies);
-  cookieFetchedAt = Date.now();
-  return cachedCookie;
+    // 再访问首页补齐其它基础 cookie（b_nut 等），已有的不覆盖。
+    // 首页 HTML 很大，单独 8s 超时，拖慢不超过这个数。
+    try {
+      const res = await fetch("https://www.bilibili.com/", {
+        headers: COMMON_HEADERS,
+        signal: AbortSignal.timeout(8000),
+      });
+      for (const c of extractSetCookies(res)) {
+        const first = c.split(";")[0];
+        const i = first.indexOf("=");
+        if (i > 0) {
+          const k = first.slice(0, i);
+          if (!cookies[k]) cookies[k] = first.slice(i + 1);
+        }
+      }
+    } catch {}
+
+    cachedCookie = cookieHeader(cookies);
+    cookieFetchedAt = Date.now();
+    return cachedCookie;
+  })().finally(() => { ensureCookiePromise = null; });
+
+  return ensureCookiePromise;
 }
 
 // ----------------------------- WBI -----------------------------
