@@ -384,18 +384,6 @@
       <button type="button" class="top-nav-item" data-placeholder="直播">直播</button>
     </nav>
 
-    <div class="search-wrap">
-      <form class="search-box" id="searchForm">
-        <input id="keyword" type="text" placeholder="搜索你感兴趣的视频" autocomplete="off" />
-        <button type="submit" aria-label="搜索">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="11" cy="11" r="7" stroke="white" stroke-width="2"/>
-            <line x1="16.5" y1="16.5" x2="21" y2="21" stroke="white" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-        </button>
-      </form>
-    </div>
-
     <div class="user-actions" id="userActions">
       <a class="login-btn" id="loginEntry" href="/account">登录</a>
 
@@ -452,42 +440,37 @@
 <div class="bvid-toast" id="bvidToast"></div>
 
 <script>
-// —— 令牌会话：WebView/iframe 等 Cookie 不可靠环境下仍可保持登录 ——
-// 登录成功后服务端返回 sid，保存在 sessionStorage/localStorage 与内存变量中，
-// 之后每个请求都通过 X-Bili-Session 请求头携带（不依赖 Cookie）。
-let _sidMem = '';
-let _buvid3Mem = '';
+// —— 登录凭证：完整 B 站 cookies 存 localStorage，请求用 X-Bili-Cookie 头带给服务端 ——
+// 服务端不落盘；换电脑/换服务器只要浏览器有这份 localStorage，登录态就不丢。
+let _credsMem = {};
 try {
-  _sidMem = sessionStorage.getItem('bili_sid') || localStorage.getItem('bili_sid') || '';
-  _buvid3Mem = sessionStorage.getItem('bili_buvid3') || localStorage.getItem('bili_buvid3') || '';
+  const raw = localStorage.getItem('bili_creds');
+  if (raw) _credsMem = JSON.parse(raw) || {};
 } catch (e) {}
 
-function _setSid(sid) {
-  _sidMem = sid || '';
+function _getCreds() { return _credsMem || {}; }
+function _setCreds(obj) {
+  _credsMem = obj || {};
   try {
-    if (sid) { sessionStorage.setItem('bili_sid', sid); localStorage.setItem('bili_sid', sid); }
-    else { sessionStorage.removeItem('bili_sid'); localStorage.removeItem('bili_sid'); }
+    if (obj && Object.keys(obj).length) localStorage.setItem('bili_creds', JSON.stringify(obj));
+    else localStorage.removeItem('bili_creds');
   } catch (e) {}
 }
-
-function _setBuvid3(b) {
-  _buvid3Mem = b || '';
-  try {
-    if (b) { sessionStorage.setItem('bili_buvid3', b); localStorage.setItem('bili_buvid3', b); }
-    else { sessionStorage.removeItem('bili_buvid3'); localStorage.removeItem('bili_buvid3'); }
-  } catch (e) {}
+function _clearCreds() { _setCreds(null); }
+function _cookieHeader() {
+  const c = _getCreds();
+  return Object.keys(c).map(k => `${k}=${c[k]}`).join('; ');
 }
 
 const _origFetch = window.fetch.bind(window);
 window.fetch = (input, opts) => {
   opts = opts || {};
+  const ch = _cookieHeader();
   if (opts.headers instanceof Headers) {
-    if (_sidMem) opts.headers.set('X-Bili-Session', _sidMem);
-    if (_buvid3Mem) opts.headers.set('X-Bili-Buvid3', _buvid3Mem);
+    if (ch) opts.headers.set('X-Bili-Cookie', ch);
   } else {
     opts.headers = Object.assign({}, opts.headers);
-    if (_sidMem) opts.headers['X-Bili-Session'] = _sidMem;
-    if (_buvid3Mem) opts.headers['X-Bili-Buvid3'] = _buvid3Mem;
+    if (ch) opts.headers['X-Bili-Cookie'] = ch;
   }
   return _origFetch(input, opts);
 };
@@ -531,12 +514,6 @@ function showToast(text) {
 document.querySelectorAll('[data-placeholder]').forEach(el => {
   el.addEventListener('click', () => showToast((el.dataset.placeholder || '该功能') + '功能开发中，敬请期待'));
 });
-document.getElementById('searchForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const kw = document.getElementById('keyword').value.trim();
-  if (kw) location.href = '/search?kw=' + encodeURIComponent(kw);
-});
-
 // 登录态：未登录显示"登录"，已登录显示头像
 function applyHeaderLogin(m) {
   const cur = document.getElementById('loginEntry');
@@ -640,7 +617,7 @@ async function pollQR(id) {
       const d = await r.json();
       if (d.status === 'waiting') el.textContent = '等待扫码…';
       else if (d.status === 'scanned') el.textContent = '已扫码，请在手机上确认登录…';
-      else if (d.status === 'success') { _setSid(d.sid); _setBuvid3(d.buvid3); el.textContent = '登录成功，正在进入个人中心…'; setTimeout(load, 500); return; }
+      else if (d.status === 'success') { _setCreds(d.cookies); el.textContent = '登录成功，正在进入个人中心…'; setTimeout(load, 500); return; }
       else if (d.status === 'expired') {
         el.innerHTML = '二维码已过期。<button class="btn primary" style="margin-left:8px" onclick="startQR()">重新生成</button>'; return;
       } else if (d.status === 'error') { el.textContent = d.message || '登录失败'; return; }
@@ -747,7 +724,7 @@ function renderProfile(u, isSelf) {
   if (isSelf) {
     document.getElementById('logout').onclick = async () => {
       await fetch('/api/logout', { method: 'POST' });
-      _setSid(''); _setBuvid3('');
+      _clearCreds();
       if (qMid) location.href = '/account'; else load();
     };
   } else {

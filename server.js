@@ -5,6 +5,7 @@ const QRCode = require("qrcode");
 const path = require("path");
 const crypto = require("crypto");
 const fs = require("fs");
+const { Readable } = require("stream");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -23,57 +24,15 @@ let cachedCookie = "";
 let cookieFetchedAt = 0;
 const COOKIE_TTL_MS = 30 * 60 * 1000;
 
-// 浏览器 -> 本 Node 服务的登录会话。
-// 注意：凭证只保存在服务端内存中，不发送给前端 JS。
-// 重启 Node 后需要重新扫码登录。
-// 登录 session 持久化到磁盘，避免 Node 重启后所有设备都要重新扫码。
-// 注意：此文件包含 SESSDATA 等敏感凭证，务必加入 .gitignore，不要提交到仓库。
-const SESSION_FILE = path.join(__dirname, "data", "sessions.json");
-
-function loadSessions() {
-  try {
-    if (!fs.existsSync(SESSION_FILE)) return new Map();
-    const raw = fs.readFileSync(SESSION_FILE, "utf8");
-    const obj = JSON.parse(raw);
-    const map = new Map();
-    for (const [k, v] of Object.entries(obj)) map.set(k, v);
-    return map;
-  } catch (e) {
-    console.error("加载 sessions 失败:", e.message);
-    return new Map();
-  }
-}
-
-let saveTimer = null;
-function saveSessions() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try {
-      fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
-      const obj = Object.fromEntries(sessions);
-      fs.writeFileSync(SESSION_FILE, JSON.stringify(obj, null, 2), { mode: 0o600 });
-    } catch (e) {
-      console.error("保存 sessions 失败:", e.message);
-    }
-  }, 200);
-}
-
-const sessions = loadSessions();
+// 登录态说明：
+// 凭证（SESSDATA / bili_jct / DedeUserID 等）完全由前端保存在 localStorage，
+// 不落在服务端、不写 data/ 文件。前端每次请求通过 X-Bili-Cookie 请求头把整串
+// B 站 cookies 带上来；服务端临时拼成 session 对象去请求 B 站，用完即弃。
+// 这样在不同电脑上开同一个服务器、用同一个浏览器客户端，登录态都不会丢。
+//
+// 匿名侧的设备指纹 cookie（buvid3 等）仍由服务端 ensureCookie() 缓存合并。
+const sessions = new Map(); // 兼容旧逻辑引用已废弃，保留为空 Map 不再持久化
 const qrSessions = new Map();   // 二维码是临时的，不需要持久化
-
-// 每天清理一次超过 30 天没活动的 session，避免文件无限增长
-setInterval(() => {
-  const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
-  let changed = false;
-  for (const [sid, s] of sessions) {
-    const last = s.lastSeen || s.createdAt || 0;
-    if (last < cutoff) {
-      sessions.delete(sid);
-      changed = true;
-    }
-  }
-  if (changed) saveSessions();
-}, 24 * 3600 * 1000);
 
 function randomId(bytes = 24) {
   return crypto.randomBytes(bytes).toString("hex");
@@ -136,55 +95,17 @@ async function followLoginTicket(url) {
   return cookies;
 }
 
-// 会话识别：优先取 X-Bili-Session 请求头（WebView/iframe 等 Cookie 不可靠环境的
-// 令牌方案），其次取 bili_session Cookie（普通浏览器方案）。
+// 会话识别：登录凭证完全由前端通过 X-Bili-Cookie 请求头携带（整串 B 站 cookies），
+// 服务端不落盘。这里临时解析成 session 对象，供后续 biliFetch 合并使用。
 function getSession(req) {
-  const sid =
-    req.headers["x-bili-session"] ||
-    (req.headers.cookie ? parseCookieString(req.headers.cookie).bili_session : "");
-  const session = sid && sessions.get(sid) ? sessions.get(sid) : null;
-
-  // WebView 场景：buvid3 由前端 localStorage 持久化，请求用 X-Bili-Buvid3 头带回。
-  // session 里没有就补进当前会话，保证写接口带设备指纹。
-  if (session) {
-    const b = req.headers["x-bili-buvid3"];
-    if (b && !session.cookies.buvid3) session.cookies.buvid3 = String(b);
-  }
-  return session;
+  const raw = String(req.headers["x-bili-cookie"] || "");
+  if (!raw) return null;
+  const cookies = parseCookieString(raw);
+  if (!cookies.SESSDATA) return null;
+  return { cookies, user: null, createdAt: 0, lastSeen: 0 };
 }
 
-// 登录会话 Cookie 的写入选项。
-// 背景：项目页面会被嵌套进 iframe（跨站第三方上下文）。若 Cookie 是
-// SameSite=Lax（默认值），浏览器在跨站 iframe 中会直接拒绝写入，
-// 导致"扫码成功但页面仍是未登录"。B 站自身的 SESSDATA 就是 SameSite=None，
-// 因此 m.bilibili.com 在嵌套状态下可以正常登录。
-// 修复：HTTPS / localhost 下使用 SameSite=None; Secure; Partitioned：
-//   - None       允许在跨站 iframe（第三方上下文）中写入和携带；
-//   - Secure     与 None 配套，Chrome 强制要求；
-//   - Partitioned (CHIPS) 让 Cookie 在 Chrome 全面拦截第三方 Cookie 后仍可用，
-//     按"顶层站点"分区存储（每个嵌入站点需各自登录一次）。
-// 非 HTTPS 的局域网 IP 等场景无法使用 Secure，退回 Lax（保持原行为）。
-function sessionCookieOptions(req) {
-  const host = req.hostname || "";
-  const secureCapable =
-    req.secure ||
-    req.headers["x-forwarded-proto"] === "https" ||
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host === "[::1]";
-  const base = {
-    httpOnly: true,
-    maxAge: 30 * 24 * 3600 * 1000,
-    path: "/",
-  };
-  if (secureCapable) {
-    return { ...base, sameSite: "none", secure: true, partitioned: true };
-  }
-  return { ...base, sameSite: "lax" };
-}
-
-// 轻量 CSRF 防护：SameSite=None 后，跨站页面发起的请求也会带上本会话 Cookie，
-// 因此对改变状态的写接口校验 Origin/Referer 必须来自本站（含被本站页面嵌套的 iframe）。
+// 轻量 CSRF 防护：对改变状态的写接口校验 Origin/Referer 必须来自本站。
 app.use((req, res, next) => {
   if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return next();
   const origin = req.headers.origin || req.headers.referer;
@@ -443,35 +364,26 @@ if (!cookies.SESSDATA) {
         message: "登录成功但没有取得 SESSDATA，请重新扫码",
       });
     }
-    // WebView 为主：buvid3 不塞服务端 session（重启就丢），改为返回前端存 localStorage，
-// 之后每个请求用 X-Bili-Buvid3 头带回（见 getSession）。
-    let buvid3 = cookies.buvid3 || "";
-    try {
-      if (!cachedCookie) await ensureCookie();
-      const base = parseCookieString(cachedCookie || "");
-      if (!buvid3 && base.buvid3) buvid3 = base.buvid3;
-    } catch {}
-    const sid = randomId(24);
-    sessions.set(sid, {
-      cookies,
-      createdAt: Date.now(),
-      lastSeen: Date.now(),
-      user: null,
-    });
-    saveSessions();
+    // buvid3 一并交给前端存 localStorage，之后随 X-Bili-Cookie 整串带回。
+    // 登录票里没带就用匿名侧抓到的设备指纹补上，保证写接口不被 -352 风控。
+    if (!cookies.buvid3) {
+      try {
+        if (!cachedCookie) await ensureCookie();
+        const base = parseCookieString(cachedCookie || "");
+        if (base.buvid3) cookies.buvid3 = base.buvid3;
+      } catch {}
+    }
     qrSessions.delete(loginId);
 
-    res.cookie("bili_session", sid, sessionCookieOptions(req));
-
-    // 登录后立即验证并拿到用户信息。
-    const userRes = await biliFetch("https://api.bilibili.com/x/web-interface/nav", {}, sessions.get(sid));
+    // 登录后立即验证并拿到用户信息（用刚拿到的 cookies 临时拼一个 session）。
+    const userRes = await biliFetch("https://api.bilibili.com/x/web-interface/nav", {}, { cookies });
     const userJson = await userRes.json();
-    sessions.get(sid).user = userJson.data || null;
 
+    // 关键：把完整 cookies 原样返回给前端，由前端存 localStorage。
+    // 服务端不再保存任何登录态、不写 data/ 文件。
     res.json({
       status: "success",
-      sid, // 前端保存在 sessionStorage/localStorage，后续通过 X-Bili-Session 请求头携带
-      buvid3,
+      cookies, // 前端存 localStorage，之后每个请求用 X-Bili-Cookie 头带回
       user: {
         mid: userJson.data?.mid,
         uname: userJson.data?.uname,
@@ -510,8 +422,6 @@ app.get("/api/me", async (req, res) => {
       return res.json({ loggedIn: false });
     }
     session.user = j.data || null;
-    session.lastSeen = Date.now();
-    saveSessions();
     const relation = await fetchRelationStat(j.data?.mid, session);
     res.json({
       loggedIn: true,
@@ -532,11 +442,9 @@ app.get("/api/me", async (req, res) => {
 });
 
 app.post("/api/logout", async (req, res) => {
-  const sid =
-    req.headers["x-bili-session"] ||
-    (req.headers.cookie ? parseCookieString(req.headers.cookie).bili_session : "");
-  const session = sid ? sessions.get(sid) : null;
-  if (session) {
+  // 凭证来自前端 X-Bili-Cookie 头，服务端无状态；调 B 站登出后前端清掉 localStorage 即可。
+  const session = getSession(req);
+  if (session?.cookies?.bili_jct) {
     try {
       await biliFetch("https://passport.bilibili.com/x/passport-login/web/logout", {
         method: "POST",
@@ -545,11 +453,6 @@ app.post("/api/logout", async (req, res) => {
       }, session);
     } catch {}
   }
-  if (sid) sessions.delete(sid);
-  saveSessions();
-  const clearOpts = sessionCookieOptions(req);
-  delete clearOpts.maxAge; // clearCookie 会自动置过期，maxAge 已弃用
-  res.clearCookie("bili_session", clearOpts);
   res.json({ ok: true });
 });
 
@@ -581,6 +484,41 @@ app.get("/api/search", async (req, res) => {
       page,
       list: (data.data?.result || []).map(normalizeVideo),
     });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "代理请求失败，请稍后重试" });
+  }
+});
+
+// UP 主搜索：search_type=bili_user。字段名沿用 B 站原始返回（upic/usign）。
+app.get("/api/search/users", async (req, res) => {
+  const keyword = String(req.query.keyword || "").trim();
+  const page = parseInt(req.query.page, 10) || 1;
+  if (!keyword) return res.status(400).json({ error: "缺少 keyword 参数" });
+
+  try {
+    const session = getSession(req);
+    const cookie = await ensureCookie();
+    const url = new URL("https://api.bilibili.com/x/web-interface/search/type");
+    url.searchParams.set("keyword", keyword);
+    url.searchParams.set("search_type", "bili_user");
+    url.searchParams.set("page", String(page));
+
+    const r = await biliFetch(url.toString(), { headers: { Cookie: cookie } }, session);
+    const data = await r.json();
+    if (data.code !== 0) return res.status(502).json({ error: `B站接口返回错误: ${data.message || data.code}` });
+
+    const list = (data.data?.result || []).map((u) => ({
+      mid: u.mid ?? null,
+      uname: sanitizeTitle(u.uname || ""),
+      face: (u.upic || "").startsWith("//") ? `https:${u.upic}` : (u.upic || ""),
+      sign: sanitizeTitle(u.usign || ""),
+      fans: u.fans ?? null,
+      videos: u.videos ?? null,
+      level: u.level ?? null,
+    }));
+
+    res.json({ total: data.data?.numResults || 0, page, list });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "代理请求失败，请稍后重试" });
@@ -737,12 +675,12 @@ async function resolveCid({ aid, bvid, page = 1 }, session = null) {
   return { cid: target.cid, aid: j.data.aid, bvid: j.data.bvid };
 }
 
-async function fetchPlayUrl({ aid, bvid, cid }, session = null) {
+async function fetchPlayUrl({ aid, bvid, cid, qn }, session = null) {
   const base = new URL("https://api.bilibili.com/x/player/playurl");
   base.searchParams.set("avid", String(aid || ""));
   base.searchParams.set("bvid", bvid || "");
   base.searchParams.set("cid", String(cid));
-  base.searchParams.set("qn", "80");
+  base.searchParams.set("qn", String(qn || 80));
   base.searchParams.set("type", "mp4");
   base.searchParams.set("otype", "json");
   base.searchParams.set("fnver", "0");
@@ -767,7 +705,10 @@ async function fetchPlayUrl({ aid, bvid, cid }, session = null) {
 
   let dash = null;
   if (dashData?.dash?.video?.length) {
-    const video = dashData.dash.video[0];
+    // qn 是"清晰度选择"的选择结果：DASH 通常一次性把已授权的所有清晰度都返回，
+    // 这里按用户选的 qn 去挑对应的那一路，找不到就退回第一路（最高画质）。
+    const wanted = qn ? dashData.dash.video.find((v) => Number(v.id) === Number(qn)) : null;
+    const video = wanted || dashData.dash.video[0];
     const audio = dashData.dash.audio?.[0];
     dash = {
       video: video.baseUrl || video.base_url,
@@ -800,12 +741,13 @@ app.get("/api/play", async (req, res) => {
   const bvid = String(req.query.bv || "").trim();
   const aid = parseInt(req.query.av || "", 10) || 0;
   const page = parseInt(req.query.p, 10) || 1;
+  const qn = parseInt(req.query.qn, 10) || 0;
   if (!bvid && !aid) return res.status(400).json({ code: 1, message: "缺少 bv 或 av 参数" });
 
   try {
     const session = getSession(req);
     const resolved = await resolveCid({ aid, bvid, page }, session);
-    const play = await fetchPlayUrl(resolved, session);
+    const play = await fetchPlayUrl({ ...resolved, qn }, session);
     res.json({ code: 0, ...resolved, page, ...play });
   } catch (e) {
     console.error(e);
@@ -850,6 +792,117 @@ app.get("/api/info", async (req, res) => {
     });
   } catch (e) {
     res.status(502).json({ code: 1, message: e.message || "获取视频信息失败" });
+  }
+});
+
+// ----------------------------- 听视频（音频模式） -----------------------------
+// 取音频直链：优先 DASH（fnval=16）取码率最高的一路，失败回退 fnval=0 的 durl。
+// 未登录也能拿到（匿名可取音频，音质受限）。
+app.get("/api/audio", async (req, res) => {
+  const bvid = String(req.query.bvid || req.query.bv || "").trim();
+  const aid = parseInt(req.query.aid || req.query.av || "", 10) || 0;
+  const cidParam = parseInt(req.query.cid || "", 10) || 0;
+  const page = parseInt(req.query.p, 10) || 1;
+  if (!bvid && !aid) return res.status(400).json({ code: 1, message: "缺少 bvid/aid 参数" });
+
+  try {
+    const session = getSession(req);
+
+    let cid = cidParam;
+    let resolvedAid = aid;
+    let resolvedBvid = bvid;
+    if (!cid) {
+      const resolved = await resolveCid({ aid, bvid, page }, session);
+      cid = resolved.cid;
+      resolvedAid = resolved.aid;
+      resolvedBvid = resolved.bvid;
+    }
+
+    const base = new URL("https://api.bilibili.com/x/player/playurl");
+    base.searchParams.set("avid", String(resolvedAid || aid || ""));
+    base.searchParams.set("bvid", resolvedBvid || bvid || "");
+    base.searchParams.set("cid", String(cid));
+    base.searchParams.set("otype", "json");
+    base.searchParams.set("platform", "html5");
+    base.searchParams.set("high_quality", "1");
+
+    // 先试 DASH，拿码率最高的音频轨
+    const dashUrl = new URL(base.toString());
+    dashUrl.searchParams.set("fnval", "16");
+    const dashRes = await biliFetch(dashUrl.toString(), {}, session).then((r) => r.json()).catch(() => null);
+    const dashData = dashRes && dashRes.code === 0 ? dashRes.data : null;
+
+    if (dashData?.dash?.audio?.length) {
+      const bestAudio = [...dashData.dash.audio].sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0))[0];
+      return res.json({
+        code: 0,
+        audioUrl: bestAudio.baseUrl || bestAudio.base_url,
+        quality: bestAudio.id,
+        isDash: true,
+      });
+    }
+
+    // 回退：fnval=0 拿 durl（视频+音频混流，只取地址当音频播）
+    const durlUrl = new URL(base.toString());
+    durlUrl.searchParams.set("fnval", "0");
+    durlUrl.searchParams.set("qn", "32");
+    const durlRes = await biliFetch(durlUrl.toString(), {}, session).then((r) => r.json()).catch(() => null);
+    const durlData = durlRes && durlRes.code === 0 ? durlRes.data : null;
+
+    if (durlData?.durl?.length) {
+      return res.json({
+        code: 0,
+        audioUrl: durlData.durl[0].url,
+        quality: durlData.quality ?? null,
+        isDash: false,
+      });
+    }
+
+    throw new Error("未获取到可播放的音频直链");
+  } catch (e) {
+    console.error(e);
+    res.status(502).json({ code: 1, message: e.message || "获取音频失败" });
+  }
+});
+
+// 音频直链走服务端代理：B 站直链有 Referer 防盗链限制，浏览器直接播放会被拒绝。
+// 白名单只放行 B 站 CDN 域名，防止被当作任意地址的转发代理（SSRF）。
+const AUDIO_PROXY_ALLOWED_HOST_RE = /^([a-z0-9-]+\.)*(bilivideo\.com|hdslb\.com)$/i;
+
+app.get("/api/audio/proxy", async (req, res) => {
+  const src = String(req.query.src || "");
+  let target;
+  try {
+    target = new URL(src);
+  } catch {
+    return res.status(400).json({ error: "非法地址" });
+  }
+  if (target.protocol !== "https:" || !AUDIO_PROXY_ALLOWED_HOST_RE.test(target.hostname)) {
+    return res.status(403).json({ error: "不允许的地址" });
+  }
+
+  try {
+    const upstream = await fetch(target.toString(), {
+      headers: {
+        "User-Agent": COMMON_HEADERS["User-Agent"],
+        Referer: "https://www.bilibili.com/",
+      },
+    });
+    if (!upstream.ok || !upstream.body) {
+      return res.status(502).json({ error: "音频拉取失败" });
+    }
+
+    res.status(upstream.status);
+    const contentType = upstream.headers.get("content-type");
+    const contentLength = upstream.headers.get("content-length");
+    if (contentType) res.setHeader("Content-Type", contentType);
+    if (contentLength) res.setHeader("Content-Length", contentLength);
+    res.setHeader("Cache-Control", "public, max-age=3600");
+
+    Readable.fromWeb(upstream.body).pipe(res);
+  } catch (e) {
+    console.error(e);
+    if (!res.headersSent) res.status(502).json({ error: "音频代理失败" });
   }
 });
 
@@ -1152,6 +1205,7 @@ app.post("/api/comments/send", async (req, res) => {
   const aid = parseInt(req.body.aid, 10) || 0;
   const message = String(req.body.message || "").trim();
   const root = String(req.body.root || "").trim();
+  const parent = String(req.body.parent || "").trim();
   if (!aid || !message) return res.status(400).json({ error: "缺少 aid 或评论内容" });
   try {
     const body = new URLSearchParams({
@@ -1163,7 +1217,7 @@ app.post("/api/comments/send", async (req, res) => {
     });
     if (root) {
       body.set("root", root);
-      body.set("parent", root);
+      body.set("parent", parent || root);
     }
     const j = await (await biliFetch("https://api.bilibili.com/x/v2/reply/add", {
       method: "POST",
@@ -1177,20 +1231,115 @@ app.post("/api/comments/send", async (req, res) => {
   }
 });
 
+// 删除自己的评论 / 回复。x/v2/reply/del，仅能删自己发的。
+app.post("/api/comments/delete", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  const aid = parseInt(req.body.aid, 10) || 0;
+  const rpid = String(req.body.rpid || "").trim();
+  if (!aid || !rpid) return res.status(400).json({ error: "缺少 aid 或 rpid" });
+  try {
+    const body = new URLSearchParams({
+      oid: String(aid),
+      type: "1",
+      rpid,
+      csrf: session.cookies.bili_jct || "",
+    });
+    const j = await (await biliFetch("https://api.bilibili.com/x/v2/reply/del", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    }, session)).json();
+    if (j.code !== 0) return res.status(502).json({ error: j.message || "删除评论失败" });
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: "删除评论失败" });
+  }
+});
+
+// 表情面板：x/emote/user/panel/web?business=reply。
+// 登录后返回默认表情 + 用户已购买 / 大会员专属表情。匿名也能拿到默认表情。
+app.get("/api/emotes", async (req, res) => {
+  const session = getSession(req);
+  try {
+    const j = await (await biliFetch(
+      "https://api.bilibili.com/x/emote/user/panel/web?business=reply",
+      {},
+      session
+    )).json();
+    if (j.code !== 0) return res.status(502).json({ error: j.message || "表情加载失败" });
+
+    const pkgs = j.data?.packages || [];
+    const emoteMap = j.data?.emote || {};
+    const list = pkgs
+      .map((p) => {
+        const id = p.package_id ?? p.id;
+        const arr = emoteMap[String(id)] || p.emote || [];
+        return {
+          id,
+          name: p.package_name || p.text || "",
+          icon: normalizeImgUrl(p.package_url || ""),
+          emojis: arr
+            .map((e) => ({
+              text: e.text || e.emoji_name || "",
+              url: normalizeImgUrl(e.url || ""),
+              size: e.meta?.size || 1,
+            }))
+            .filter((e) => e.text && e.url),
+        };
+      })
+      .filter((p) => p.emojis.length);
+    res.json({ list });
+  } catch (e) {
+    console.error("表情面板异常:", e && e.message);
+    res.status(500).json({ error: "表情加载失败" });
+  }
+});
+
+// 评论正文里的表情映射：把 [微笑] 这类占位符映射到表情图 URL。
+// B 站返回 content.emoji 数组，每项 text/emoji_name 形如 "[微笑]"，url 是表情图。
+function normalizeReplyEmoji(content) {
+  const out = {};
+  for (const e of content?.emoji || []) {
+    const rawName = e.emoji_name || e.text || "";
+    const name = String(rawName).replace(/^\[|\]$/g, "");
+    if (name && e.url) out[name] = normalizeImgUrl(e.url);
+  }
+  return out;
+}
+
+// 评论附图：content.pictures 数组里的图片。
+function normalizeReplyPictures(content) {
+  return (content?.pictures || [])
+    .map((p) => ({
+      src: normalizeImgUrl(p.img_src || ""),
+      width: p.img_width || 0,
+      height: p.img_height || 0,
+    }))
+    .filter((p) => p.src);
+}
+
 function normalizeReply(item) {
   return {
     rpid: item.rpid,
+    mid: item.member?.mid ?? 0,
     uname: item.member?.uname || "",
-    avatar: item.member?.avatar || "",
+    avatar: normalizeImgUrl(item.member?.avatar || ""),
     message: item.content?.message || "",
+    emoji: normalizeReplyEmoji(item.content),
+    pictures: normalizeReplyPictures(item.content),
     like: item.like ?? 0,
     liked: item.action === 1, // action: 0=未操作 1=已点赞 2=已点踩
     rcount: item.rcount ?? (item.replies ? item.replies.length : 0),
     ctime: item.ctime || 0,
     replies: (item.replies || []).slice(0, 3).map((sub) => ({
       rpid: sub.rpid,
+      mid: sub.member?.mid ?? 0,
       uname: sub.member?.uname || "",
+      avatar: normalizeImgUrl(sub.member?.avatar || ""),
       message: sub.content?.message || "",
+      emoji: normalizeReplyEmoji(sub.content),
+      pictures: normalizeReplyPictures(sub.content),
       like: sub.like ?? 0,
       liked: sub.action === 1,
       ctime: sub.ctime || 0,
@@ -1668,18 +1817,7 @@ app.listen(PORT, () => {
   console.log(`  我的:   http://localhost:${PORT}/account`);
 });
 
-// 进程退出前把 sessions 立刻写盘，避免防抖窗口内的数据丢失
-function flushSessionsAndExit() {
-  try {
-    clearTimeout(saveTimer);
-    fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
-    const obj = Object.fromEntries(sessions);
-    fs.writeFileSync(SESSION_FILE, JSON.stringify(obj, null, 2), { mode: 0o600 });
-  } catch (e) {
-    console.error("退出时保存 sessions 失败:", e.message);
-  }
-  process.exit(0);
-}
-process.on("SIGINT", flushSessionsAndExit);
-process.on("SIGTERM", flushSessionsAndExit);
+// 凭证完全在前端 localStorage，服务端无状态，退出无需写盘。
+process.on("SIGINT", () => process.exit(0));
+process.on("SIGTERM", () => process.exit(0));
 //（注：内容由AI生成）

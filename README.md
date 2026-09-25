@@ -58,13 +58,15 @@ npm start
 
 ## 登录说明
 
-登录采用 B站 Web QR 登录流程。登录成功后，SESSDATA / bili_jct 等凭证只保存在 Node 服务端内存的 session 中，不暴露给前端 JavaScript。
-**作者注：这太不方便了，必须改。**
+登录采用 B站 Web QR 登录流程。登录成功后，SESSDATA / bili_jct / DedeUserID / buvid3
+等**完整 B 站 cookies 由服务端随登录响应原样返回，前端保存在浏览器 `localStorage`
+（key：`bili_creds`）中**，服务端不再保存任何登录态、不再写 `data/` 文件。
 
-`/account` 页面会显示官方登录链接并轮询登录状态。若要做真正的网页二维码显示，可以继续加入本地 QR 编码库，而不应把登录 URL 交给第三方图片服务。
+之后每个 API 请求前端自动通过 `X-Bili-Cookie` 请求头把整串 cookies 带给服务端，
+服务端临时拼起来去请求 B 站、用完即弃。这样换一台电脑开同一个服务器、用同一个
+浏览器客户端（或导出 `bili_creds`），登录信息都不会丢失；服务重启也不影响。
 
-注意：服务重启后内存 session 会清空，需要重新扫码。
-**作者注：已修复，现前端登录数据会存到`/data/`中，登录状态会保持**
+`/account` 页面显示二维码并轮询登录状态。退出登录时前端会清掉 `bili_creds`。
 
 ### 嵌套（iframe）场景登录说明
 
@@ -174,7 +176,9 @@ PORT=3199 node test/auth-token-test.js  # 无头全链路断言
 | `/api/comments` | 主评论列表 |
 | `/api/comments/replies` | 展开楼中楼 |
 | `/api/comments/like` | 评论点赞 |
-| `/api/comments/send` | 发表评论 |
+| `/api/comments/send` | 发表评论 / 回复（root+parent） |
+| `/api/comments/delete` | 删除自己的评论 / 回复 |
+| `/api/emotes` | 表情面板（默认表情 + 已购买表情） |
 
 ### 历史 / 收藏
 

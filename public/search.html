@@ -28,6 +28,11 @@
     font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
       "Segoe UI", Roboto, sans-serif;
     padding-top: var(--banner-h);
+    transition: padding-top .2s ease;
+  }
+  /* 搜索态：banner 隐藏，顶部只留顶栏高度 */
+  body.search-active {
+    padding-top: var(--header-h);
   }
 
   a { color: inherit; text-decoration: none; }
@@ -405,6 +410,62 @@
   }
   .meta-row b { color: var(--pink); font-weight: 600; }
 
+  /* ============ UP 主卡片行 ============ */
+  .up-card-row {
+    display: none;
+    gap: 12px;
+    overflow-x: auto;
+    padding: 4px 2px 16px;
+    margin-bottom: 4px;
+    scrollbar-width: thin;
+  }
+  .up-card {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 240px;
+    padding: 10px 14px;
+    background: #fbeef2;
+    border: 1px solid #f6dbe4;
+    border-radius: 999px;
+    color: inherit;
+    transition: background .15s ease, transform .12s ease;
+  }
+  .up-card:hover { background: #f7dde6; transform: translateY(-2px); }
+  .up-card-avatar {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: #e7e8ea;
+  }
+  .up-card-body { min-width: 0; }
+  .up-card-name {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .up-card-sign {
+    margin: 2px 0 0;
+    font-size: 11px;
+    color: var(--text-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .up-card-meta {
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--text-3);
+    white-space: nowrap;
+  }
+
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -778,6 +839,7 @@
 
 <!-- ============ 内容区 ============ -->
 <div class="content">
+  <div class="up-card-row" id="upCardRow"></div>
   <div class="filter-bar" id="filterBar">
     <div class="filter-group" id="sortGroup">
       <button class="sort-tab active" data-order="">综合排序</button>
@@ -810,31 +872,50 @@
 <div class="bvid-toast" id="bvidToast"></div>
 
 <script>
-// ============ 令牌会话 ============
-let _sidMem = '';
-let _buvid3Mem = '';
+// ============ 登录凭证：cookies 存 localStorage，请求用 X-Bili-Cookie 头带回 ============
+let _credsMem = {};
 try {
-  _sidMem = sessionStorage.getItem('bili_sid') || localStorage.getItem('bili_sid') || '';
-  _buvid3Mem = sessionStorage.getItem('bili_buvid3') || localStorage.getItem('bili_buvid3') || '';
+  const raw = localStorage.getItem('bili_creds');
+  if (raw) _credsMem = JSON.parse(raw) || {};
 } catch (e) {}
+
+function _getCreds() { return _credsMem || {}; }
+function _setCreds(obj) {
+  _credsMem = obj || {};
+  try {
+    if (obj && Object.keys(obj).length) localStorage.setItem('bili_creds', JSON.stringify(obj));
+    else localStorage.removeItem('bili_creds');
+  } catch (e) {}
+}
+function _clearCreds() { _setCreds(null); }
+function _cookieHeader() {
+  const c = _getCreds();
+  return Object.keys(c).map(k => `${k}=${c[k]}`).join('; ');
+}
 
 const _origFetch = window.fetch.bind(window);
 window.fetch = (input, opts) => {
   opts = opts || {};
+  const ch = _cookieHeader();
   if (opts.headers instanceof Headers) {
-    if (_sidMem) opts.headers.set('X-Bili-Session', _sidMem);
-    if (_buvid3Mem) opts.headers.set('X-Bili-Buvid3', _buvid3Mem);
+    if (ch) opts.headers.set('X-Bili-Cookie', ch);
   } else {
     opts.headers = Object.assign({}, opts.headers);
-    if (_sidMem) opts.headers['X-Bili-Session'] = _sidMem;
-    if (_buvid3Mem) opts.headers['X-Bili-Buvid3'] = _buvid3Mem;
+    if (ch) opts.headers['X-Bili-Cookie'] = ch;
   }
   return _origFetch(input, opts);
 };
 
 // ============ 顶栏滚动状态 ============
 const siteHeader = document.getElementById('siteHeader');
+// 搜索态：banner 隐藏后顶栏强制保持"滚动后"样式，不透明叠图态失效，
+// 滚动监听在这个状态下不再把 .scrolled 摘掉。
+let searchModeActive = false;
 function updateHeaderState() {
+  if (searchModeActive) {
+    siteHeader.classList.add('scrolled');
+    return;
+  }
   const bannerH = document.getElementById('bannerSection')?.offsetHeight || 180;
   const threshold = Math.max(40, bannerH * 0.5);
   if (window.scrollY > threshold) {
@@ -846,6 +927,17 @@ function updateHeaderState() {
 window.addEventListener('scroll', updateHeaderState, { passive: true });
 window.addEventListener('resize', updateHeaderState);
 updateHeaderState();
+
+// 进入搜索态：隐藏 banner、缩短顶部留白、锁定顶栏为不透明样式。
+// 刷新页面会重新走一遍初始化流程，banner 自然恢复显示。
+function enterSearchMode() {
+  if (searchModeActive) return;
+  searchModeActive = true;
+  document.body.classList.add('search-active');
+  const bannerSection = document.getElementById('bannerSection');
+  if (bannerSection) bannerSection.style.display = 'none';
+  updateHeaderState();
+}
 
 // ============ 登录态检测 ============
 (async function checkLogin() {
@@ -1170,14 +1262,54 @@ recommendResults.addEventListener('click', (e) => {
   if (bvid) window.location.href = `/player?bv=${encodeURIComponent(bvid)}`;
 });
 
+// ============ UP 主卡片 ============
+const upCardRow = document.getElementById('upCardRow');
+
+function upCardHTML(u) {
+  const name = escapeAttr(u.uname || '');
+  const sign = escapeAttr(u.sign || '');
+  const metaParts = [];
+  if (u.fans != null) metaParts.push(`${formatCount(u.fans)} 粉丝`);
+  if (u.videos != null) metaParts.push(`${formatCount(u.videos)} 稿件`);
+  return `
+    <a class="up-card" href="/account?mid=${encodeURIComponent(u.mid)}">
+      <img class="up-card-avatar" src="${u.face || ''}" alt="" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'" />
+      <div class="up-card-body">
+        <p class="up-card-name" title="${name}">${u.uname || ''}</p>
+        ${u.sign ? `<p class="up-card-sign" title="${sign}">${u.sign}</p>` : ''}
+        <div class="up-card-meta">${metaParts.join(' · ')}</div>
+      </div>
+    </a>
+  `;
+}
+
+async function loadUpUsers(keyword) {
+  try {
+    const res = await fetch(`/api/search/users?keyword=${encodeURIComponent(keyword)}&page=1`);
+    const data = await res.json();
+    if (!res.ok || !data.list || !data.list.length) {
+      upCardRow.style.display = 'none';
+      upCardRow.innerHTML = '';
+      return;
+    }
+    upCardRow.innerHTML = data.list.slice(0, 12).map(upCardHTML).join('');
+    upCardRow.style.display = 'flex';
+  } catch (e) {
+    upCardRow.style.display = 'none';
+    upCardRow.innerHTML = '';
+  }
+}
+
 async function doSearch(keyword, page = 1) {
   if (!keyword) return;
+  enterSearchMode();
   currentKeyword = keyword;
   currentPage = page;
   metaRow.textContent = '';
   filterBar.classList.add('show');
   recommendSection.style.display = 'none';
   renderSkeleton();
+  loadUpUsers(keyword);
   try {
     const params = new URLSearchParams({ keyword, page: String(page), order: currentOrder });
     const res = await fetch(`/api/search?${params.toString()}`);
@@ -1339,9 +1471,23 @@ function renderBannerCarousel(items) {
   start();
 }
 
-loadBanner();
-
-loadRecommend();
+// ============ 顶栏搜索跳转过来的 kw 参数：自动填入并搜索 ============
+// player.html 等页面的顶栏搜索会跳到 /search?kw=xxx，这里接住参数，
+// 同时按搜索态规则隐藏 banner（用户刷新本页时行为一致）。
+(function initFromQuery() {
+  let kw = '';
+  try {
+    kw = new URLSearchParams(window.location.search).get('kw') || '';
+  } catch (e) {}
+  kw = kw.trim();
+  if (kw) {
+    input.value = kw;
+    doSearch(kw, 1);
+  } else {
+    loadBanner();
+    loadRecommend();
+  }
+})();
 </script>
 
 </body>
