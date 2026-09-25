@@ -662,17 +662,34 @@ app.get("/api/recommend", async (req, res) => {
 });
 
 // ----------------------------- 视频信息 / 播放 -----------------------------
-async function resolveCid({ aid, bvid, page = 1 }, session = null) {
+// 打开一个视频时，/api/info、/api/play(resolveCid)、/api/comments(resolveAid)
+// 会各调一次 /x/web-interface/view。手机后端每次往返都慢，这里短缓存（60s）消除重复请求。
+const viewCache = new Map();
+const VIEW_TTL_MS = 60 * 1000;
+
+async function fetchView({ aid, bvid }, session) {
+  const key = bvid ? `bv:${bvid}` : `av:${aid}`;
+  const hit = viewCache.get(key);
+  if (hit && Date.now() - hit.at < VIEW_TTL_MS) return hit.data;
+
   const u = new URL("https://api.bilibili.com/x/web-interface/view");
   if (bvid) u.searchParams.set("bvid", bvid);
-  if (aid) u.searchParams.set("aid", String(aid));
-  const r = await biliFetch(u.toString(), {}, session);
-  const j = await r.json();
-  if (j.code !== 0 || !j.data) throw new Error(`获取视频信息失败: ${j.message || j.code}`);
-  const pages = j.data.pages || [];
+  else u.searchParams.set("aid", String(aid));
+  const j = await (await biliFetch(u.toString(), {}, session)).json();
+  if (j.code === 0 && j.data) {
+    viewCache.set(key, { data: j.data, at: Date.now() });
+    if (viewCache.size > 200) viewCache.delete(viewCache.keys().next().value); // 简单上限防膨胀
+  }
+  return j.data;
+}
+
+async function resolveCid({ aid, bvid, page = 1 }, session = null) {
+  const data = await fetchView({ aid, bvid }, session);
+  if (!data) throw new Error("获取视频信息失败");
+  const pages = data.pages || [];
   const target = pages[(parseInt(page, 10) || 1) - 1];
   if (!target) throw new Error("该视频不存在对应分P");
-  return { cid: target.cid, aid: j.data.aid, bvid: j.data.bvid };
+  return { cid: target.cid, aid: data.aid, bvid: data.bvid };
 }
 
 async function fetchPlayUrl({ aid, bvid, cid, qn }, session = null) {
@@ -688,20 +705,12 @@ async function fetchPlayUrl({ aid, bvid, cid, qn }, session = null) {
   base.searchParams.set("platform", "html5");
   base.searchParams.set("high_quality", "1");
 
-  // 并行发两次请求：DASH (fnval=16) + durl (fnval=0) 作为兜底
+  // 先走 DASH（fnval=16）。手机后端每次请求都贵，不再并行多发 durl；
+  // 只有 DASH 拿不到可用视频流时，才补一发 durl（fnval=0）兜底。
   const dashUrl = new URL(base.toString());
   dashUrl.searchParams.set("fnval", "16");
-  const durlUrl = new URL(base.toString());
-  durlUrl.searchParams.set("fnval", "0");
-
-  const [dashRes, durlRes] = await Promise.all([
-    biliFetch(dashUrl.toString(), {}, session).then(r => r.json()).catch(() => null),
-    biliFetch(durlUrl.toString(), {}, session).then(r => r.json()).catch(() => null),
-  ]);
-
-  // 优先看 DASH
-  const dashData = (dashRes && dashRes.code === 0) ? dashRes.data : null;
-  const durlData = (durlRes && durlRes.code === 0) ? durlRes.data : null;
+  const dashRes = await biliFetch(dashUrl.toString(), {}, session).then(r => r.json()).catch(() => null);
+  let dashData = (dashRes && dashRes.code === 0) ? dashRes.data : null;
 
   let dash = null;
   if (dashData?.dash?.video?.length) {
@@ -718,9 +727,14 @@ async function fetchPlayUrl({ aid, bvid, cid, qn }, session = null) {
     };
   }
 
+  let durlData = null;
   let fallbackUrl = "";
-  if (durlData?.durl?.length) {
-    fallbackUrl = durlData.durl[0].url;
+  if (!dash) {
+    const durlUrl = new URL(base.toString());
+    durlUrl.searchParams.set("fnval", "0");
+    const durlRes = await biliFetch(durlUrl.toString(), {}, session).then(r => r.json()).catch(() => null);
+    durlData = (durlRes && durlRes.code === 0) ? durlRes.data : null;
+    if (durlData?.durl?.length) fallbackUrl = durlData.durl[0].url;
   }
 
   if (!dash && !fallbackUrl) {
@@ -761,33 +775,29 @@ app.get("/api/info", async (req, res) => {
   if (!bvid && !aid) return res.status(400).json({ code: 1, message: "缺少 bv 或 av 参数" });
   try {
     const session = getSession(req);
-    const u = new URL("https://api.bilibili.com/x/web-interface/view");
-    if (bvid) u.searchParams.set("bvid", bvid);
-    if (aid) u.searchParams.set("aid", String(aid));
-    const r = await biliFetch(u.toString(), {}, session);
-    const j = await r.json();
-    if (j.code !== 0 || !j.data) throw new Error(j.message || "获取视频信息失败");
+    const j = await fetchView({ aid, bvid }, session);
+    if (!j) throw new Error("获取视频信息失败");
     res.json({
       code: 0,
-      aid: j.data.aid,
-      bvid: j.data.bvid,
-      title: j.data.title || "",
-      pubdate: j.data.pubdate || 0,
-      desc: j.data.desc || "",
-      pages: (j.data.pages || []).map((p, i) => ({ page: i + 1, cid: p.cid, part: p.part || `第 ${i + 1} P` })),
-      pic: j.data.pic?.startsWith("//") ? `https:${j.data.pic}` : j.data.pic,
-      author: j.data.owner?.name || "",
-      mid: j.data.owner?.mid ?? 0,
-      face: j.data.owner?.face || "",
-      duration: j.data.duration || 0,
-      play: j.data.stat?.view ?? null,
+      aid: j.aid,
+      bvid: j.bvid,
+      title: j.title || "",
+      pubdate: j.pubdate || 0,
+      desc: j.desc || "",
+      pages: (j.pages || []).map((p, i) => ({ page: i + 1, cid: p.cid, part: p.part || `第 ${i + 1} P` })),
+      pic: j.pic?.startsWith("//") ? `https:${j.pic}` : j.pic,
+      author: j.owner?.name || "",
+      mid: j.owner?.mid ?? 0,
+      face: j.owner?.face || "",
+      duration: j.duration || 0,
+      play: j.stat?.view ?? null,
       stat: {
-        like: j.data.stat?.like ?? null,
-        coin: j.data.stat?.coin ?? null,
-        favorite: j.data.stat?.favorite ?? null,
-        reply: j.data.stat?.reply ?? null,
-        danmaku: j.data.stat?.danmaku ?? null,
-        share: j.data.stat?.share ?? null,
+        like: j.stat?.like ?? null,
+        coin: j.stat?.coin ?? null,
+        favorite: j.stat?.favorite ?? null,
+        reply: j.stat?.reply ?? null,
+        danmaku: j.stat?.danmaku ?? null,
+        share: j.stat?.share ?? null,
       },
     });
   } catch (e) {
@@ -933,11 +943,9 @@ app.get("/api/related", async (req, res) => {
 // 参考 WristBilibili 的 likeVideo / coinVideo / favVideo。
 async function resolveAid({ aid, bvid }, session) {
   if (aid) return parseInt(aid, 10);
-  const u = new URL("https://api.bilibili.com/x/web-interface/view");
-  u.searchParams.set("bvid", bvid);
-  const j = await (await biliFetch(u.toString(), {}, session)).json();
-  if (j.code !== 0 || !j.data) throw new Error(j.message || "视频不存在");
-  return j.data.aid;
+  const data = await fetchView({ bvid }, session);
+  if (!data) throw new Error("视频不存在");
+  return data.aid;
 }
 
 // 获取当前登录用户对该视频的点赞/投币/收藏状态。未登录时返回全部为空状态。
