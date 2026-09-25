@@ -1,4 +1,4 @@
-# Bilibili Web Client 4.9
+# Bilibili Web Client 5.2
 ## 第一作者：awa-obli
 ## 第二作者：huajianluoli
 
