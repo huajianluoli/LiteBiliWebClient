@@ -1,6 +1,6 @@
 # LiteBili Web Client
 
-基于 Node.js + Express 的自制 B 站网页客户端，可在手机 Termux 上跑后端，另一台设备浏览器访问。
+> 基于 Node.js + Express 的自制 B 站网页客户端。
 
 ## 运行
 
