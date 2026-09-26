@@ -420,6 +420,7 @@
     scrollbar-width: thin;
   }
   .up-card {
+    position: relative;
     flex: 0 0 auto;
     display: flex;
     align-items: center;
@@ -428,20 +429,23 @@
     padding: 10px 14px;
     background: #fbeef2;
     border: 1px solid #f6dbe4;
-    border-radius: 999px;
+    border-radius: 14px;
     color: inherit;
     transition: background .15s ease, transform .12s ease;
   }
   .up-card:hover { background: #f7dde6; transform: translateY(-2px); }
+  .up-card-avatar-wrap { position: relative; flex-shrink: 0; }
   .up-card-avatar {
-    flex-shrink: 0;
+    display: block;
     width: 44px;
     height: 44px;
     border-radius: 50%;
     object-fit: cover;
     background: #e7e8ea;
   }
+  .up-card.is-live .up-card-avatar { box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px #FB7299; }
   .up-card-body { min-width: 0; }
+  .up-card-name-row { display: flex; align-items: center; gap: 6px; }
   .up-card-name {
     margin: 0;
     font-size: 13px;
@@ -450,6 +454,26 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .up-card-live-badge {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+    background: #FB7299;
+    padding: 1px 6px 1px 5px;
+    border-radius: 8px;
+    line-height: 1.5;
+  }
+  .up-card-live-badge::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #fff;
   }
   .up-card-sign {
     margin: 2px 0 0;
@@ -762,7 +786,7 @@
 
     <nav class="top-nav">
       <a class="top-nav-item active" href="/search">首页</a>
-      <button type="button" class="top-nav-item" data-placeholder="直播">直播</button>
+      <a class="top-nav-item" href="/live">直播</a>
     </nav>
 
     <div class="search-wrap">
@@ -792,12 +816,12 @@
         </svg>
       </button>
 
-      <button type="button" class="user-icon" title="消息" data-placeholder="消息">
+      <a class="user-icon" href="/message" title="消息">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.6"/>
           <path d="M4 7l8 5 8-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
-      </button>
+      </a>
 
       <a class="user-icon" href="/account?tab=fav" title="收藏">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1271,11 +1295,18 @@ function upCardHTML(u) {
   const metaParts = [];
   if (u.fans != null) metaParts.push(`${formatCount(u.fans)} 粉丝`);
   if (u.videos != null) metaParts.push(`${formatCount(u.videos)} 稿件`);
+  const isLive = u.liveStatus === 1 && u.roomId;
+  const href = isLive ? `/stream?room_id=${encodeURIComponent(u.roomId)}` : `/account?mid=${encodeURIComponent(u.mid)}`;
   return `
-    <a class="up-card" href="/account?mid=${encodeURIComponent(u.mid)}">
-      <img class="up-card-avatar" src="${u.face || ''}" alt="" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'" />
+    <a class="up-card${isLive ? ' is-live' : ''}" href="${href}">
+      <div class="up-card-avatar-wrap">
+        <img class="up-card-avatar" src="${u.face || ''}" alt="" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'" />
+      </div>
       <div class="up-card-body">
-        <p class="up-card-name" title="${name}">${u.uname || ''}</p>
+        <div class="up-card-name-row">
+          <p class="up-card-name" title="${name}">${u.uname || ''}</p>
+          ${isLive ? '<span class="up-card-live-badge">直播中</span>' : ''}
+        </div>
         ${u.sign ? `<p class="up-card-sign" title="${sign}">${u.sign}</p>` : ''}
         <div class="up-card-meta">${metaParts.join(' · ')}</div>
       </div>

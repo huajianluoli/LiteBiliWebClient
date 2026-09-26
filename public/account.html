@@ -209,6 +209,7 @@
     flex-wrap: wrap;
   }
   .avatar-big {
+    display: block;
     width: 88px;
     height: 88px;
     border-radius: 50%;
@@ -216,8 +217,33 @@
     background: #eee;
     border: 4px solid rgba(255,255,255,.9);
     box-shadow: 0 3px 15px rgba(0,0,0,.1);
-    flex-shrink: 0;
   }
+  .avatar-big-link {
+    position: relative;
+    display: inline-block;
+    width: 88px;
+    height: 88px;
+    flex-shrink: 0;
+    cursor: default;
+  }
+  .avatar-big-link.is-live .avatar-big { box-shadow: 0 3px 15px rgba(0,0,0,.1), 0 0 0 3px var(--pink); }
+  .avatar-big-link.is-live { cursor: pointer; }
+  .avatar-live-badge {
+    display: none;
+    position: absolute;
+    left: 50%;
+    bottom: -4px;
+    transform: translateX(-50%);
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+    background: var(--pink);
+    padding: 1px 7px;
+    border-radius: 8px;
+    white-space: nowrap;
+    box-shadow: 0 1px 4px rgba(0,0,0,.2);
+  }
+  .avatar-big-link.is-live .avatar-live-badge { display: block; }
   .hero-main { min-width: 0; flex: 1 1 260px; }
   .hero-name { font-size: 22px; font-weight: 700; }
   .hero-badges { display: inline-flex; gap: 6px; margin-left: 8px; vertical-align: middle; }
@@ -381,7 +407,7 @@
 
     <nav class="top-nav">
       <a class="top-nav-item" href="/search">首页</a>
-      <button type="button" class="top-nav-item" data-placeholder="直播">直播</button>
+      <a class="top-nav-item" href="/live">直播</a>
     </nav>
 
     <div class="user-actions" id="userActions">
@@ -398,12 +424,12 @@
         </svg>
       </button>
 
-      <button type="button" class="user-icon" title="消息" data-placeholder="消息">
+      <a class="user-icon" href="/message" title="消息">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.6"/>
           <path d="M4 7l8 5 8-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
-      </button>
+      </a>
 
       <a class="user-icon" href="/account?tab=fav" title="收藏">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -704,7 +730,10 @@ function renderProfile(u, isSelf) {
   if (isSelf) stats.push(statHTML('statCoin', fmtCount(u.coin), '硬币数'));
 
   app.innerHTML = `<section class="hero">
-    <img class="avatar-big" src="${esc(faceUrl(u.face))}" referrerpolicy="no-referrer">
+    <a class="avatar-big-link" id="avatarBigLink" href="javascript:void(0)">
+      <img class="avatar-big" src="${esc(faceUrl(u.face))}" referrerpolicy="no-referrer">
+      <span class="avatar-live-badge">直播中</span>
+    </a>
     <div class="hero-main">
       <span class="hero-name">${esc(name)}</span>
       <span class="hero-badges">
@@ -742,6 +771,20 @@ function renderProfile(u, isSelf) {
     const b = e.target.closest('.tab');
     if (b) activateTab(b.dataset.tab);
   });
+
+  // 该用户是否正在直播：拿到直播间号后头像可点击直接进直播间
+  (async () => {
+    if (!ctx.mid) return;
+    try {
+      const r = await fetch(`/api/live/status?uids=${ctx.mid}`);
+      const d = await r.json();
+      const info = d[String(ctx.mid)];
+      const link = document.getElementById('avatarBigLink');
+      if (!link || !info || info.liveStatus !== 1 || !info.roomId) return;
+      link.classList.add('is-live');
+      link.href = `/stream?room_id=${encodeURIComponent(info.roomId)}`;
+    } catch (e) {}
+  })();
 
   // 默认显示"投稿视频"；自己的主页可通过 ?tab=history / ?tab=fav 直达
   addTab('videos', '投稿视频');

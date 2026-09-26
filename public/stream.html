@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>直播间 - B站视频搜索器</title>
+<style>
+    :root {
+        --header-h: 60px;
+        --header-bg: #000000;
+        --header-icon-color: #ffffff;
+        --pink: #FB7299;
+    }
+    * { box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background-color: #000000;
+        color: #ffffff;
+        margin: 0;
+        padding: calc(var(--header-h) + 32px) 20px 40px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    .container { width: 100%; max-width: 1000px; }
+
+    /* ============ 顶栏（与 player.html 一致：不透明、固定、深色） ============ */
+    .site-header {
+        position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+        height: var(--header-h); background: var(--header-bg);
+        border-bottom: 1px solid #1a1a1a; color: var(--header-icon-color);
+    }
+    .site-header .user-icon svg, .site-header .header-search-box button svg { color: var(--header-icon-color); }
+    .site-header .user-icon svg [stroke]:not([stroke="none"]),
+    .site-header .header-search-box button svg [stroke]:not([stroke="none"]) { stroke: currentColor; }
+    .site-header .user-icon svg [fill]:not([fill="none"]) { fill: currentColor; }
+    .header-inner { max-width: 1400px; height: 100%; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; gap: 20px; }
+    .logo { display: flex; align-items: center; flex-shrink: 0; white-space: nowrap; user-select: none; color: #FB7299; text-decoration: none; }
+    .logo-svg { display: block; height: 26px; width: auto; color: #FB7299; }
+    .logo-svg path { fill: #FB7299; }
+    .top-nav { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+    .top-nav-item {
+        display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: none; background: none;
+        border-radius: 8px; color: #dddddd; font-size: 14px; font-family: inherit; font-weight: 500; cursor: pointer;
+        text-decoration: none; transition: background .15s ease, color .15s ease;
+    }
+    .top-nav-item:hover { background: rgba(255, 255, 255, .08); color: #ffffff; }
+    .top-nav-item.active { color: #ffffff; font-weight: 650; }
+    .header-search-wrap { position: relative; flex: 1 1 auto; min-width: 0; max-width: 420px; margin: 0 auto; }
+    .header-search-box { display: flex; width: 100%; height: 38px; background: #141414; border-radius: 19px; overflow: hidden; border: 1px solid #232323; transition: border-color .15s ease; }
+    .header-search-box:focus-within { border-color: #3a3a3a; }
+    .header-search-box input { flex: 1; min-width: 0; border: none; outline: none; padding: 0 16px; font-size: 13px; color: #ffffff; background: transparent; }
+    .header-search-box input::placeholder { color: #666666; }
+    .header-search-box button { border: none; background: #FB7299; color: #fff; padding: 0 18px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; transition: filter .15s ease; }
+    .header-search-box button:hover { filter: brightness(.94); }
+    .user-actions { margin-left: auto; display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+    .user-icon {
+        display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: none;
+        background: none; border-radius: 50%; padding: 0; color: var(--header-icon-color); font-family: inherit;
+        cursor: pointer; text-decoration: none; transition: background .15s ease, color .15s ease;
+    }
+    .user-icon:hover { background: rgba(255, 255, 255, .08); color: var(--header-icon-color); }
+    .user-icon svg { display: block; }
+    .login-btn { height: 32px; padding: 0 16px; border-radius: 16px; background: #FB7299; color: #fff; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; transition: filter .15s ease; }
+    .login-btn:hover { filter: brightness(.94); }
+    .avatar-btn { width: 32px; height: 32px; padding: 0; border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; background: #222222; color: #ffffff; font-weight: 600; font-size: 13px; text-decoration: none; }
+    .avatar-btn img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+    /* ============ 直播间信息条 ============ */
+    .room-title { margin: 0 0 4px; font-size: 18px; font-weight: 700; line-height: 1.4; word-break: break-all; }
+    .room-meta-line { font-size: 12px; color: #888888; margin: 0 0 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .room-live-tag { display: inline-flex; align-items: center; gap: 4px; color: var(--pink); font-weight: 600; }
+    .room-live-tag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--pink); }
+    .room-live-tag.offline { color: #666; }
+    .room-live-tag.offline::before { background: #666; }
+
+    .player-wrap { position: relative; width: 100%; }
+    #videoPlayer { width: 100%; height: 520px; border: 1px solid #222222; border-radius: 8px; overflow: hidden; background: #000000; display: block; }
+    .offline-panel {
+        display: none; width: 100%; height: 520px; border-radius: 8px; background: #0a0a0a;
+        border: 1px solid #222222; align-items: center; justify-content: center; flex-direction: column; gap: 14px; text-align: center;
+    }
+    .offline-panel.show { display: flex; }
+    .offline-panel img { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; opacity: .5; }
+    .offline-panel p { margin: 0; color: #888; font-size: 14px; }
+
+    /* UP 主关注组件 */
+    .up-follow { display: none; align-items: center; gap: 10px; margin-top: 16px; }
+    .up-follow.show { display: flex; }
+    .up-avatar-link { display: block; width: 44px; height: 44px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: #1a1a1a; border: 1px solid #222222; text-decoration: none; transition: border-color .15s ease; }
+    .up-avatar-link:hover { border-color: #555555; }
+    .up-avatar-link img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .up-info { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0; }
+    .up-name { font-size: 14px; font-weight: 600; color: #eee; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+    .up-fans { font-size: 11px; color: #777; }
+    .follow-btn {
+        margin-left: 8px; padding: 0 16px; height: 30px; font-size: 12px; font-weight: 600; background: #FB7299; color: #fff;
+        border: none; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+        transition: filter .15s ease, background .15s ease, color .15s ease; white-space: nowrap;
+    }
+    .follow-btn:hover { filter: brightness(.92); }
+    .follow-btn:disabled { opacity: .6; cursor: default; }
+    .follow-btn.followed, .follow-btn.followed:hover { background: #3a3a3a; color: #bbb; filter: none; }
+
+    /* ============ 实时评论（弹幕文字流，不叠加在视频上） ============ */
+    .live-body { display: flex; flex-direction: column; gap: 0; }
+    .live-left { display: flex; flex-direction: column; min-width: 0; }
+    .chat-panel { margin-top: 22px; border: 1px solid #222222; border-radius: 8px; background: #0a0a0a; overflow: hidden; display: flex; flex-direction: column; }
+    .chat-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #1a1a1a; }
+    .chat-header-title { font-size: 13px; font-weight: 600; color: #ddd; letter-spacing: 1px; }
+    .chat-status { font-size: 11px; color: #666; display: flex; align-items: center; gap: 5px; }
+    .chat-status-dot { width: 6px; height: 6px; border-radius: 50%; background: #555; }
+    .chat-status.connected .chat-status-dot { background: #2ecc71; }
+    .chat-status.connecting .chat-status-dot { background: #f5a623; }
+    .chat-status.error .chat-status-dot { background: #e74c3c; }
+    .chat-list { height: 320px; overflow-y: auto; padding: 10px 16px; display: flex; flex-direction: column; gap: 8px; }
+    .chat-item { font-size: 13px; line-height: 1.6; word-break: break-all; }
+    .chat-item .chat-uname { color: #7fd8ff; font-weight: 600; margin-right: 6px; }
+    .chat-item.gift .chat-uname { color: #ffc83d; }
+    .chat-item.gift .chat-text { color: #ffc83d; }
+    .chat-item.enter { color: #777; font-size: 12px; }
+    .chat-item.sc { background: rgba(251, 114, 153, .12); border-radius: 6px; padding: 6px 10px; }
+    .chat-empty { color: #555; font-size: 13px; text-align: center; padding: 30px 0; }
+    .chat-input-bar { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid #1a1a1a; background: #0e0e0e; }
+    .chat-input-bar input { flex: 1; min-width: 0; background: #1a1a1a; border: 1px solid #262626; border-radius: 18px; padding: 8px 14px; font-size: 13px; color: #eee; outline: none; }
+    .chat-input-bar input:focus { border-color: #fb7299; }
+    .chat-input-bar button { background: #fb7299; color: #fff; border: none; border-radius: 18px; padding: 0 18px; font-size: 13px; cursor: pointer; }
+    .chat-input-bar button:disabled { background: #555; cursor: not-allowed; }
+
+    @media (max-width: 640px) {
+        :root { --header-h: 56px; }
+        body { padding: calc(var(--header-h) + 20px) 14px 40px; }
+        .header-inner { padding: 0 14px; gap: 10px; }
+        .header-search-wrap { display: none; }
+        .logo-svg { height: 22px; }
+        .user-actions { gap: 0; }
+        .user-icon { width: 32px; height: 32px; }
+        .user-actions .user-icon:not(.always-show) { display: none; }
+        #videoPlayer, .offline-panel { height: 240px; }
+        .chat-list { height: 260px; }
+    }
+
+    /* 横屏（手机横过来 / 宽屏）：播放器居左缩小，评论区居右占满高度 */
+    @media (orientation: landscape) and (min-width: 700px) {
+        body { padding-top: calc(var(--header-h) + 16px); }
+        .container { max-width: 1400px; }
+        .live-body { flex-direction: row; gap: 16px; align-items: stretch; }
+        .live-left { flex: 1 1 auto; min-width: 0; }
+        #videoPlayer { height: calc(100vh - var(--header-h) - 60px); max-height: 760px; }
+        .offline-panel { height: calc(100vh - var(--header-h) - 60px); max-height: 760px; }
+        .chat-panel { margin-top: 0; flex: 0 0 280px; width: 280px; max-height: calc(100vh - var(--header-h) - 60px); }
+        .chat-list { flex: 1 1 auto; height: auto; min-height: 0; }
+    }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/artplayer/5.1.7/artplayer.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.17/hls.min.js"></script>
+</head>
+<body>
+
+<header class="site-header">
+    <div class="header-inner">
+        <a class="logo" href="/search" title="首页" aria-label="bilibili">
+            <svg class="logo-svg" viewBox="0 0 52 24" xmlns="http://www.w3.org/2000/svg">
+                    <path fill="currentColor" fill-rule="evenodd" d="M46.573 20.632c-.215 0-.398.017-.577-.004-.364-.042-.729-.034-1.093-.044-.236-.007-.229-.007-.248-.235-.059-.696-.123-1.392-.185-2.088-.054-.611-.105-1.223-.165-1.834-.054-.56-.12-1.117-.178-1.676-.057-.526-.109-1.052-.167-1.576-.074-.66-.15-1.32-.23-1.98-.07-.583-.14-1.168-.218-1.75-.122-.903-.248-1.805-.376-2.707a79.498 79.498 0 00-.474-2.873c-.03-.171-.026-.177.137-.205.679-.116 1.361-.215 2.052-.2.074.002.15.004.224.013.121.015.184.074.191.216.024.494.059.987.095 1.48.058.808.121 1.616.181 2.423.039.52.072 1.038.11 1.557.063.833.13 1.666.192 2.499.039.51.072 1.02.111 1.53.06.748.125 1.495.186 2.242.038.476.072.952.113 1.428.06.705.124 1.41.185 2.114.046.55.087 1.102.134 1.67zM20.291 3.468c.1 0 .25-.011.398.002.188.018.224.066.236.256.054.868.105 1.736.163 2.605.063.936.132 1.871.201 2.806.064.859.128 1.717.196 2.576.075.943.158 1.885.233 2.829.058.722.106 1.445.165 2.168.056.671.122 1.34.183 2.011.05.577.103 1.154.153 1.732.016.183.003.195-.194.19-.515-.013-1.027-.073-1.542-.059-.118.004-.152-.05-.172-.163-.043-.244-.036-.492-.062-.739-.07-.652-.111-1.307-.17-1.961-.054-.594-.119-1.187-.18-1.78-.054-.543-.107-1.085-.165-1.628-.058-.533-.119-1.067-.179-1.6-.055-.491-.11-.982-.169-1.473-.087-.719-.173-1.438-.268-2.156-.087-.659-.185-1.315-.278-1.973a77.866 77.866 0 00-.425-2.674 30.006 30.006 0 00-.114-.602c-.02-.101-.002-.16.113-.175.303-.041.605-.104.91-.134.304-.028.609-.085.967-.058zm21.565 8.668c.58 0 .594.004.687.527.115.646.195 1.297.271 1.948.08.694.161 1.387.235 2.082.06.559.11 1.12.166 1.678.06.586.122 1.17.183 1.755.033.33.065.661.102.991.011.096-.017.146-.111.157-.199.023-.395.05-.593.07-.362.04-.725.078-1.087.112-.188.017-.2.007-.235-.175-.318-1.646-.637-3.291-.952-4.939-.21-1.095-.414-2.19-.62-3.286-.028-.15-.053-.302-.077-.453-.014-.087.01-.143.108-.166.653-.153 1.313-.271 1.923-.301zm-24.373 0c.62 0 .618.002.714.567.148.873.253 1.752.347 2.633.091.856.192 1.71.282 2.565.06.586.108 1.172.165 1.756.04.416.089.831.133 1.246.005.051.008.102.011.154.01.203 0 .22-.195.24-.387.04-.776.074-1.163.112-.14.014-.28.035-.42.048-.185.017-.191.017-.227-.17-.13-.66-.257-1.32-.384-1.98-.306-1.588-.615-3.175-.92-4.763-.12-.636-.225-1.274-.344-1.91-.022-.116-.006-.17.114-.198.648-.152 1.3-.27 1.887-.3zm8.19 6.66v2.665c0 .025-.002.051.002.077.012.13-.035.186-.168.18-.175-.007-.348-.002-.523.002-.365.007-.73-.008-1.095.034-.201.024-.197.011-.217-.202-.06-.67-.125-1.341-.186-2.012-.056-.62-.107-1.24-.164-1.86-.058-.637-.124-1.273-.183-1.91-.04-.424-.076-.848-.111-1.273-.047-.553-.09-1.105-.139-1.658-.02-.233-.003-.266.227-.29a11.356 11.356 0 011.79-.056c.15.009.297.038.441.073.182.043.202.07.212.26.02.384.04.768.05 1.152.011.427.002.854.017 1.281.04 1.178.034 2.357.048 3.536zm24.325.12v2.524c0 .043-.001.085.001.129.009.11-.043.15-.147.149-.258-.002-.515 0-.772.003-.291.003-.581.002-.871.033-.192.022-.193.008-.21-.183l-.242-2.622c-.072-.807-.14-1.614-.213-2.421-.077-.833-.16-1.663-.234-2.495a84.78 84.78 0 01-.1-1.25c-.011-.182.008-.214.213-.23.355-.029.709-.077 1.067-.07.356.006.714-.014 1.068.054.3.058.316.075.333.397.052.947.036 1.896.07 2.843.034 1.008.01 2.016.037 3.14zm-8.747-11.36c.21.012.375.002.54.038.104.024.157.072.167.184.05.543.103 1.086.157 1.63.043.44.09.88.134 1.321l.004.026c.036.277.028.285-.242.3-.24.013-.48.034-.72.049-.157.01-.207.036-.233-.194-.09-.813-.194-1.623-.294-2.435a25.338 25.338 0 00-.092-.683c-.02-.13.03-.2.15-.21.158-.015.316-.019.429-.026zm-24.295.003c.162.01.329-.003.492.034.093.022.14.061.15.168.02.254.058.508.082.762.076.78.148 1.561.22 2.342.015.17.011.174-.147.185-.281.021-.563.042-.845.053-.164.008-.184-.012-.205-.18-.071-.575-.138-1.15-.207-1.726-.055-.474-.102-.948-.17-1.421-.018-.13.025-.167.129-.188.165-.034.331-.023.501-.029zm8.556 2.15v1.482c0 .222-.003.224-.224.221a6.928 6.928 0 01-.792-.041c-.17-.022-.174-.016-.179-.197-.017-.604-.035-1.209-.047-1.813-.009-.409-.014-.817-.038-1.226-.013-.21-.002-.213.2-.216.299-.003.597.01.893.056.178.028.186.028.187.226l.001 1.508h-.001zm24.337.012v1.484c0 .208-.004.21-.212.208a10.826 10.826 0 01-.817-.039c-.136-.01-.175-.067-.166-.19v-.052c-.02-.954-.042-1.908-.06-2.862-.001-.05-.004-.102-.002-.153.003-.193.003-.198.196-.196.265.001.529.015.793.041.323.032.266.072.268.328v1.431zm-33.559 1.16c.007.272.007.272-.253.335-.176.043-.352.09-.53.13-.151.034-.178.015-.204-.134l-.541-3.038c-.036-.21-.027-.222.179-.259.253-.044.505-.088.758-.128.161-.025.182-.016.214.162.064.36.124.72.172 1.083.073.573.133 1.149.2 1.723.005.042.003.085.005.127zM39.1 7.945c.331-.054.665-.11 1-.162.12-.019.156.057.171.164.057.396.129.79.175 1.186.069.575.163 1.147.18 1.726l.003.18c.003.091-.043.139-.128.159-.226.05-.453.102-.678.156-.108.026-.145-.02-.163-.126-.067-.403-.146-.804-.215-1.205-.117-.662-.231-1.324-.345-1.986-.003-.024 0-.05 0-.092zm-15.232 2.322c-.01.352.011.659-.037.965-.014.097-.042.16-.146.169-.224.018-.447.036-.67.059-.107.011-.137-.035-.155-.141-.05-.313-.04-.63-.071-.944-.057-.594-.081-1.191-.12-1.786-.009-.145-.023-.29-.035-.434-.006-.081.026-.127.112-.13.29-.012.578-.065.869-.054.17.006.184.017.196.189.008.119.006.239.009.359l.048 1.748zm24.326-.341c0 .41.005.82 0 1.23-.004.212-.028.23-.229.25-.199.018-.396.033-.594.054-.112.012-.164-.02-.171-.15-.029-.544-.068-1.088-.106-1.632-.03-.451-.063-.902-.094-1.352-.004-.052-.001-.103-.004-.154-.005-.09.022-.143.123-.146.281-.01.56-.064.843-.054.173.006.176.009.189.189.042.587.046 1.176.043 1.765zM15.46 17.249c.355.392.373.856.256 1.341-.118.486-.387.886-.713 1.245-.546.6-1.207 1.042-1.909 1.418a13.319 13.319 0 01-3.827 1.333 22.16 22.16 0 01-2.91.376c-.298.016-.595.03-.893.028-.216 0-.433.006-.648-.002-.184-.006-.21-.038-.225-.23-.056-.688-.103-1.377-.164-2.065-.072-.798-.155-1.595-.232-2.392-.056-.577-.105-1.155-.167-1.73-.071-.678-.151-1.355-.23-2.033-.07-.626-.14-1.252-.215-1.879-.084-.694-.171-1.386-.264-2.078-.09-.667-.185-1.333-.283-1.999-.16-1.095-.333-2.189-.521-3.28a69.862 69.862 0 00-.507-2.66c-.025-.118.01-.165.114-.208.992-.413 1.981-.833 2.973-1.248.184-.077.373-.141.57-.178.135-.025.17.003.166.14-.01.35.004.701-.03 1.05a3.478 3.478 0 00-.014.281c-.016 1.255-.03 2.51.002 3.766.03 1.1.087 2.199.15 3.298.05.868.122 1.736.197 2.602.072.849.16 1.697.244 2.546.015.161.03.176.213.152.36-.055.725-.085 1.09-.09 1.133-.003 2.248.153 3.35.415.966.23 1.904.536 2.804.963.446.212.872.457 1.26.767.133.105.251.225.363.351zm24.154-.206c.439.386.598.858.474 1.442-.104.482-.338.887-.651 1.25-.502.582-1.112 1.024-1.771 1.394-1.294.726-2.671 1.198-4.12 1.47-.79.15-1.587.262-2.389.334-.454.04-.91.088-1.419.057h-.595c-.116 0-.182-.037-.192-.175-.043-.603-.094-1.206-.148-1.81-.058-.636-.122-1.273-.182-1.91-.055-.584-.106-1.17-.165-1.756-.055-.551-.118-1.101-.178-1.652-.055-.517-.109-1.034-.17-1.55-.073-.626-.15-1.252-.228-1.877-.073-.584-.145-1.167-.222-1.75-.083-.625-.17-1.25-.261-1.873-.122-.81-.253-1.616-.382-2.423a70.147 70.147 0 00-.624-3.417c-.01-.05-.014-.102-.03-.15-.035-.11 0-.17.107-.212 1.054-.413 2.074-.912 3.138-1.305.139-.052.28-.11.43-.126.135-.013.169.009.156.153-.071.783-.03 1.57-.067 2.354-.03.64-.027 1.28.005 1.92.008.163.014.326.013.488-.009.768.032 1.536.07 2.304.051 1.014.124 2.026.2 3.038.053.731.124 1.46.192 2.19.037.4.076.8.125 1.197.027.219.038.22.253.192a7.627 7.627 0 011.14-.088 15.02 15.02 0 013.95.599c.874.249 1.725.56 2.529.995.362.193.702.427 1.012.697zM8.609 20.83c.496-.237 2.907-2.126 3.098-2.434-1.17-.506-2.344-.975-3.606-1.36l.508 3.794zm27.377-2.31c.061-.067.055-.119-.03-.156-.166-.076-.331-.157-.5-.227-.9-.369-1.805-.726-2.732-1.018-.081-.025-.164-.081-.268-.033l.5 3.728c.074.016.103-.018.136-.041.843-.62 1.69-1.233 2.5-1.9.136-.111.272-.224.394-.353z"/>
+                </svg>
+        </a>
+
+        <nav class="top-nav">
+            <a class="top-nav-item" href="/search">首页</a>
+            <a class="top-nav-item active" href="/live">直播</a>
+        </nav>
+
+        <div class="header-search-wrap">
+            <form class="header-search-box" id="headerSearchForm">
+                <input id="headerKeyword" type="text" placeholder="搜索你感兴趣的内容" autocomplete="off" />
+                <button type="submit" aria-label="搜索">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+                        <line x1="16.5" y1="16.5" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </form>
+        </div>
+
+        <div class="user-actions" id="userActions">
+            <a class="login-btn" id="loginEntry" href="/account">登录</a>
+
+            <a class="user-icon" href="/message" title="消息">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.6"/>
+                    <path d="M4 7l8 5 8-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                </svg>
+            </a>
+
+            <a class="user-icon" href="/account?tab=fav" title="收藏">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7L12 3.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                </svg>
+            </a>
+
+            <a class="user-icon always-show" href="/player" title="播放器">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
+                    <path d="M10.3 8.5L15.8 12L10.3 15.5V8.5Z" fill="currentColor"/>
+                </svg>
+            </a>
+        </div>
+    </div>
+</header>
+
+<div class="container">
+    <p class="room-title" id="roomTitle">正在加载直播间…</p>
+    <div class="room-meta-line" id="roomMeta"></div>
+
+    <div class="live-body">
+    <div class="live-left">
+
+        <div class="player-wrap">
+            <div id="videoPlayer"></div>
+            <div class="offline-panel" id="offlinePanel">
+                <img id="offlineFace" src="" alt="">
+                <p id="offlineText">主播还没有开播</p>
+            </div>
+        </div>
+
+        <div class="up-follow" id="upFollow">
+            <a class="up-avatar-link" id="upAvatarLink" href="javascript:void(0)" title="主播主页">
+                <img id="upAvatarImg" src="" alt="" referrerpolicy="no-referrer" />
+            </a>
+            <div class="up-info">
+                <div class="up-name" id="upName"></div>
+                <div class="up-fans" id="upFans"></div>
+            </div>
+            <button class="follow-btn" id="followBtn" type="button">关注+</button>
+        </div>
+    </div>
+
+    <div class="chat-panel">
+        <div class="chat-header">
+            <span class="chat-header-title">实时评论</span>
+            <span class="chat-status connecting" id="chatStatus"><span class="chat-status-dot"></span><span id="chatStatusText">连接中…</span></span>
+        </div>
+        <div class="chat-list" id="chatList"><div class="chat-empty">暂无弹幕</div></div>
+        <div class="chat-input-bar">
+            <input id="chatInput" type="text" maxlength="30" placeholder="发个友善的弹幕见证当下" autocomplete="off" />
+            <button id="chatSend">发送</button>
+        </div>
+    </div>
+    </div><!-- /.live-body -->
+</div>
+
+<div class="bvid-toast" id="bvidToast" style="position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(20px);background:rgba(24,25,28,.9);color:#fff;font-size:14px;padding:10px 18px;border-radius:8px;z-index:200;opacity:0;pointer-events:none;transition:opacity .2s ease, transform .2s ease;white-space:nowrap;"></div>
+
+<script>
+// ============ 登录凭证（与其它页面一致） ============
+let _credsMem = {};
+try { const raw = localStorage.getItem('bili_creds'); if (raw) _credsMem = JSON.parse(raw) || {}; } catch (e) {}
+function _cookieHeader() { return Object.keys(_credsMem || {}).map(k => `${k}=${_credsMem[k]}`).join('; '); }
+const _origFetch = window.fetch.bind(window);
+window.fetch = (input, opts) => {
+    opts = opts || {};
+    const ch = _cookieHeader();
+    if (opts.headers instanceof Headers) { if (ch) opts.headers.set('X-Bili-Cookie', ch); }
+    else { opts.headers = Object.assign({}, opts.headers); if (ch) opts.headers['X-Bili-Cookie'] = ch; }
+    return _origFetch(input, opts);
+};
+
+function faceUrl(f) { f = String(f || ''); return f.startsWith('//') ? 'https:' + f : f; }
+function fmtCount(n) {
+    if (n == null) return '';
+    n = Number(n) || 0;
+    if (n >= 100000000) return (n / 100000000).toFixed(1).replace(/\.0$/, '') + '亿';
+    if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, '') + '万';
+    return String(n);
+}
+let toastTimer = null;
+function showToast(text) {
+    const t = document.getElementById('bvidToast');
+    t.textContent = text;
+    t.style.opacity = '1'; t.style.transform = 'translateX(-50%) translateY(0)';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateX(-50%) translateY(20px)'; }, 1800);
+}
+
+document.getElementById('headerSearchForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const kw = document.getElementById('headerKeyword').value.trim();
+    if (!kw) return;
+    location.href = '/search?kw=' + encodeURIComponent(kw);
+});
+
+// ============ 登录态 ============
+let isLoggedIn = false, myMid = 0;
+const authReady = (async function checkHeaderLogin() {
+    try {
+        const r = await fetch('/api/me');
+        const d = await r.json();
+        if (d.loggedIn && d.user) {
+            isLoggedIn = true;
+            myMid = Number(d.user.mid) || 0;
+            const loginEntry = document.getElementById('loginEntry');
+            if (!loginEntry) return;
+            const a = document.createElement('a');
+            a.className = 'avatar-btn';
+            a.href = '/account';
+            a.title = d.user.uname || '';
+            if (d.user.face) {
+                const img = document.createElement('img');
+                img.src = faceUrl(d.user.face);
+                img.referrerPolicy = 'no-referrer';
+                a.appendChild(img);
+            } else {
+                a.textContent = (d.user.uname || '我').slice(0, 1);
+            }
+            loginEntry.replaceWith(a);
+        }
+    } catch (e) {}
+})();
+
+// ============ 房间号 ============
+const params = new URLSearchParams(location.search);
+const roomId = parseInt(params.get('room_id'), 10) || 0;
+let currentUid = 0;
+let upFollowed = false;
+
+if (!roomId) {
+    document.getElementById('roomTitle').textContent = '缺少直播间号';
+} else {
+    loadRoom();
+}
+
+async function loadRoom() {
+    try {
+        const r = await fetch('/api/live/room?room_id=' + roomId);
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || '直播间信息获取失败');
+        document.title = `${d.title || '直播间'} - ${d.uname || ''} - B站视频搜索器`;
+        document.getElementById('roomTitle').textContent = d.title || '';
+        const metaEl = document.getElementById('roomMeta');
+        const liveTag = d.liveStatus === 1
+            ? '<span class="room-live-tag">直播中</span>'
+            : '<span class="room-live-tag offline">未开播</span>';
+        const parts = [liveTag];
+        if (d.areaName) parts.push((d.parentAreaName ? d.parentAreaName + ' · ' : '') + d.areaName);
+        if (d.online != null) parts.push(fmtCount(d.online) + ' 人气');
+        metaEl.innerHTML = parts.join('<span style="opacity:.4">丨</span>');
+
+        renderUpFollow(d);
+
+        if (d.liveStatus === 1) {
+            loadPlay();
+        } else {
+            document.getElementById('offlineFace').src = faceUrl(d.face);
+            document.getElementById('offlinePanel').classList.add('show');
+            setChatStatus('error', '主播未开播，暂无实时评论');
+        }
+    } catch (e) {
+        document.getElementById('roomTitle').textContent = '直播间加载失败';
+        document.getElementById('roomMeta').textContent = e.message || '';
+    }
+    connectChat();
+}
+
+/* ----------------------------- UP 主关注 ----------------------------- */
+function setFollowState(followed) {
+    upFollowed = !!followed;
+    const btn = document.getElementById('followBtn');
+    btn.classList.toggle('followed', upFollowed);
+    btn.textContent = upFollowed ? '已关注' : '关注+';
+}
+
+async function loadFollowState(mid) {
+    await authReady;
+    if (mid !== currentUid) return;
+    const btn = document.getElementById('followBtn');
+    if (isLoggedIn && myMid && myMid === Number(mid)) { btn.style.display = 'none'; return; }
+    if (!isLoggedIn) return;
+    try {
+        const r = await fetch(`/api/relation?mid=${encodeURIComponent(mid)}`);
+        const d = await r.json();
+        if (mid !== currentUid) return;
+        setFollowState(!!d.following);
+    } catch (e) {}
+}
+
+function renderUpFollow(d) {
+    if (!d.uname) return;
+    currentUid = d.uid || 0;
+    document.getElementById('upName').textContent = d.uname;
+    document.getElementById('upFans').textContent = d.follower != null ? `${fmtCount(d.follower)} 粉丝` : '';
+    const img = document.getElementById('upAvatarImg');
+    if (d.face) img.src = faceUrl(d.face);
+    const link = document.getElementById('upAvatarLink');
+    link.href = currentUid ? `/account?mid=${currentUid}` : 'javascript:void(0)';
+    document.getElementById('upFollow').classList.add('show');
+    document.getElementById('followBtn').style.display = '';
+    setFollowState(false);
+    if (currentUid) loadFollowState(currentUid);
+}
+
+document.getElementById('followBtn').addEventListener('click', async () => {
+    if (!currentUid) return;
+    const btn = document.getElementById('followBtn');
+    if (btn.disabled) return;
+    const mid = currentUid;
+    const willFollow = !upFollowed;
+    if (!willFollow && !confirm(`确定不再关注「${document.getElementById('upName').textContent}」吗？`)) return;
+    btn.disabled = true;
+    try {
+        const r = await fetch('/api/follow', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fid: mid, act: willFollow ? 1 : 2 }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (mid !== currentUid) return;
+        if (!r.ok) {
+            showToast(d.error || (willFollow ? '关注失败' : '取消关注失败'));
+            if (d.code === -101 || d.code === -111) setTimeout(() => location.href = '/account', 1500);
+            return;
+        }
+        setFollowState(willFollow);
+    } catch (e) {
+        showToast('网络异常，请重试');
+    } finally {
+        btn.disabled = false;
+    }
+});
+
+/* ----------------------------- 播放器（HLS via artplayer + hls.js） ----------------------------- */
+let art = null;
+let liveQualities = [], liveCurrentQn = 10000;
+function initPlayer(url) {
+    if (art) { art.destroy(false); art = null; }
+    art = new Artplayer({
+        container: '#videoPlayer',
+        url,
+        type: 'customHls',
+        isLive: true,
+        autoplay: true,
+        autoSize: false,
+        muted: false,
+        setting: true,
+        fullscreen: true,
+        fullscreenWeb: true,
+        pip: true,
+        theme: '#FB7299',
+        moreVideoAttr: { crossOrigin: 'anonymous' },
+        customType: {
+            customHls: function (video, url, art) {
+                if (Hls.isSupported()) {
+                    if (art.hls) art.hls.destroy();
+                    const hls = new Hls();
+                    hls.loadSource(url);
+                    hls.attachMedia(video);
+                    art.hls = hls;
+                    art.on('destroy', () => hls.destroy());
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    video.src = url;
+                } else {
+                    art.notice.show = '当前浏览器不支持播放直播流';
+                }
+            },
+        },
+    });
+    art.on('error', () => showToast('直播流加载失败，可能是主播已下播'));
+
+    // 清晰度选择器（放进播放器设置菜单，和 player.html 一致）
+    if (liveQualities && liveQualities.length && art.setting) {
+        const curDesc = (liveQualities.find(q => q.qn === liveCurrentQn) || {}).desc || '原画';
+        art.setting.update({
+            html: '清晰度',
+            tooltip: curDesc,
+            icon: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M9 15V9l6 3-6 3Z" fill="currentColor"/></svg>',
+            selector: liveQualities.map(q => ({
+                html: q.desc,
+                value: q.qn,
+                default: q.qn === liveCurrentQn,
+            })),
+            onSelect: function (item) {
+                if (item.value !== liveCurrentQn) loadPlay(item.value);
+                return item.html;
+            },
+        });
+    }
+}
+
+async function loadPlay(qn) {
+    try {
+        const q = qn ? '&qn=' + qn : '';
+        const r = await fetch('/api/live/play?room_id=' + roomId + q);
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || '取流失败');
+        liveQualities = d.qualities || [];
+        liveCurrentQn = d.currentQn || qn || 10000;
+        const url = d.hlsUrl || d.flvUrl;
+        if (!url) throw new Error('未获取到播放地址');
+        initPlayer(url);
+    } catch (e) {
+        document.getElementById('offlinePanel').classList.add('show');
+        document.getElementById('offlineText').textContent = e.message || '取流失败';
+    }
+}
+
+/* ----------------------------- 实时评论（WebSocket 转发弹幕） ----------------------------- */
+function setChatStatus(state, text) {
+    const el = document.getElementById('chatStatus');
+    el.className = 'chat-status ' + state;
+    document.getElementById('chatStatusText').textContent = text;
+}
+
+function appendChat(html, cls) {
+    const list = document.getElementById('chatList');
+    if (list.querySelector('.chat-empty')) list.innerHTML = '';
+    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+    const div = document.createElement('div');
+    div.className = 'chat-item' + (cls ? ' ' + cls : '');
+    div.innerHTML = html;
+    list.appendChild(div);
+    while (list.children.length > 200) list.removeChild(list.firstChild);
+    if (atBottom) list.scrollTop = list.scrollHeight;
+}
+
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+let chatSocket = null;
+function connectChat() {
+    if (!roomId) return;
+    try {
+        const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+        const cookieParam = encodeURIComponent(_cookieHeader());
+        chatSocket = new WebSocket(proto + location.host + '/ws/live?room_id=' + roomId + '&cookie=' + cookieParam);
+    } catch (e) {
+        setChatStatus('error', '实时评论不可用');
+        return;
+    }
+    setChatStatus('connecting', '连接中…');
+    chatSocket.onopen = () => setChatStatus('connected', '已连接');
+    chatSocket.onclose = () => { if (document.getElementById('chatStatusText').textContent.indexOf('连接中') === 0) setChatStatus('error', '连接已断开'); };
+    chatSocket.onerror = () => setChatStatus('error', '连接出错');
+    chatSocket.onmessage = (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        handleChatEvent(msg.cmd, msg.data);
+    };
+}
+
+// bilibili-live-ws 按 cmd 分发事件，事件体大体沿用 B 站直播弹幕协议原始结构；
+// 字段名可能随依赖版本变化，这里做了多重兜底，取不到就跳过而不是报错。
+function handleChatEvent(cmd, data) {
+    if (!data) return;
+    try {
+        if (cmd === '__error') { setChatStatus('error', data.message || '弹幕服务异常'); return; }
+        if (cmd === '__open') { setChatStatus('connected', '已连接'); return; }
+        if (cmd === '__close') { setChatStatus('error', '连接已断开'); return; }
+        if (cmd === 'DANMU_MSG') {
+            const info = data.info || data;
+            const text = info?.[1] ?? '';
+            const uname = info?.[2]?.[1] ?? '观众';
+            if (text) appendChat(`<span class="chat-uname">${esc(uname)}：</span><span class="chat-text">${esc(text)}</span>`);
+            return;
+        }
+        if (cmd === 'SEND_GIFT') {
+            const g = data.data || data;
+            const uname = g?.uname || '观众';
+            const giftName = g?.giftName || g?.gift_name || '礼物';
+            const num = g?.num || 1;
+            appendChat(`<span class="chat-uname">${esc(uname)}</span><span class="chat-text"> 送出了 ${esc(giftName)} x${num}</span>`, 'gift');
+            return;
+        }
+        if (cmd === 'INTERACT_WORD') {
+            const w = data.data || data;
+            const uname = w?.uname || '观众';
+            appendChat(`${esc(uname)} 进入了直播间`, 'enter');
+            return;
+        }
+        if (cmd === 'SUPER_CHAT_MESSAGE') {
+            const s = data.data || data;
+            const uname = s?.user_info?.uname || '观众';
+            const message = s?.message || '';
+            appendChat(`<span class="chat-uname">${esc(uname)}：</span><span class="chat-text">${esc(message)}</span>`, 'sc');
+            return;
+        }
+        if (cmd === 'PREPARING') {
+            appendChat('直播已结束', 'enter');
+            return;
+        }
+    } catch (e) { /* 单条弹幕解析失败不影响后续 */ }
+}
+
+/* ----------------------------- 发送弹幕 ----------------------------- */
+const chatInput = document.getElementById('chatInput');
+const chatSend = document.getElementById('chatSend');
+async function sendChat() {
+    const msg = (chatInput.value || '').trim();
+    if (!msg) return;
+    if (!_credsMem || !_credsMem.SESSDATA) { alert('请先登录后再发弹幕'); return; }
+    chatSend.disabled = true;
+    try {
+        const body = new URLSearchParams({ roomid: String(roomId), message: msg });
+        const r = await fetch('/api/live/send', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+        const j = await r.json();
+        if (!r.ok || j.error) { alert(j.error || '发送失败'); return; }
+        chatInput.value = '';
+    } catch (e) { alert('发送失败'); } finally { chatSend.disabled = false; }
+}
+chatSend.addEventListener('click', sendChat);
+chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+</script>
+</body>
+</html>

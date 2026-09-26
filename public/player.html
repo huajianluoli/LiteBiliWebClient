@@ -236,13 +236,19 @@
             color: #ffffff;
             word-break: break-all;
         }
-        /* 视频发布时间（位于大标题下方） */
+        /* 视频发布时间 + 播放量（位于大标题下方） */
         .video-meta-line {
             font-size: 12px;
             color: #888888;
             margin: 0 0 10px;
             letter-spacing: .3px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex-wrap: wrap;
         }
+        .meta-item { display: inline-flex; align-items: center; gap: 5px; }
+        .meta-item svg { flex-shrink: 0; }
         /* 视频描述区 */
         .desc-box {
             width: 100%;
@@ -499,18 +505,18 @@
         .player-action-btn.coin.active { color: #FFC83D; border-color: #FFC83D; }
         .player-action-btn.fav.active { color: #00AEEC; border-color: #00AEEC; }
 
-        /* UP 主关注组件（头像 + 名字/关注按钮） */
+        /* UP 主关注组件（stream 风格） */
         .up-follow {
             display: none;
             align-items: center;
-            gap: 8px;
+            gap: 12px;
             flex-shrink: 0;
         }
         .up-follow.show { display: flex; }
         .up-avatar-link {
             display: block;
-            width: 40px;
-            height: 40px;
+            width: 46px;
+            height: 46px;
             border-radius: 50%;
             overflow: hidden;
             flex-shrink: 0;
@@ -530,23 +536,29 @@
             display: flex;
             flex-direction: column;
             justify-content: center;
-            gap: 2px;
-            height: 40px;
+            gap: 3px;
             min-width: 0;
         }
         .up-name {
-            font-size: 11px;
-            color: #bbbbbb;
+            font-size: 15px;
+            font-weight: 600;
+            color: #ffffff;
             line-height: 1.2;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            max-width: 96px;
+            max-width: 180px;
+        }
+        .up-fans {
+            font-size: 12px;
+            color: #888888;
+            line-height: 1.2;
         }
         .follow-btn {
-            padding: 0 10px;
-            height: 20px;
-            font-size: 11px;
+            margin-left: 4px;
+            padding: 0 18px;
+            height: 32px;
+            font-size: 13px;
             font-weight: 600;
             background: #FB7299;
             color: #ffffff;
@@ -565,11 +577,11 @@
         /* 已关注：灰底 + 深灰字 */
         .follow-btn.followed,
         .follow-btn.followed:hover {
-            background: #c8c8c8;
-            color: #4a4a4a;
+            background: #3a3a3a;
+            color: #bbb;
             filter: none;
         }
-        .follow-btn.followed:hover { background: #d6d6d6; }
+        .follow-btn.followed:hover { background: #444; }
 
         /* 解析输入框（宽度压缩，给 UP 主关注组件让位） */
         .search-box {
@@ -788,6 +800,21 @@
             margin-top: 25px;
             width: 100%;
         }
+        /* 发弹幕栏 */
+        .art-dm-input-wrap { display: flex; align-items: center; gap: 6px; margin: 0 8px; position: relative; }
+        .art-dm-input-wrap input { width: 130px; background: rgba(255,255,255,.15); border: none; border-radius: 14px; padding: 4px 12px; font-size: 12px; color: #fff; outline: none; }
+        .art-dm-input-wrap input::placeholder { color: rgba(255,255,255,.5); }
+        .art-dm-input-wrap button { background: #FB7299; color: #fff; border: none; border-radius: 14px; padding: 4px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+        .art-dm-input-wrap button:disabled { background: #555; }
+        .dm-style-btn { width: 26px; height: 26px; border-radius: 50%; background: rgba(255,255,255,.15); color: #fff; border: none; font-size: 13px; cursor: pointer; flex-shrink: 0; padding: 0 !important; }
+        .dm-style-pop { position: absolute; bottom: 40px; left: 0; background: #222; border-radius: 8px; padding: 10px; z-index: 10; min-width: 200px; }
+        .dm-style-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; color: #ccc; }
+        .dm-style-row span { color: #888; flex-shrink: 0; }
+        .dm-style-row label { display: flex; align-items: center; gap: 3px; cursor: pointer; color: #ccc; }
+        .dm-style-row i { display: inline-block; width: 16px; height: 16px; border-radius: 50%; }
+        .dm-style-row input[type="radio"] { display: none; }
+        .dm-style-row input[type="radio"]:checked + i { outline: 2px solid #FB7299; outline-offset: 1px; }
+
         .comment-list.show { display: block; }
         .comment-count {
             color: #555555;
@@ -861,6 +888,8 @@
             border-bottom: 1px solid #1a1a1a;
         }
         .comment-item:last-child { border-bottom: none; }
+        .comment-highlight { background: rgba(251,114,153,0.15); border-radius: 8px; }
+        .comment-highlight .comment-body { flex: 1; }
         .comment-avatar {
             width: 36px;
             height: 36px;
@@ -996,21 +1025,21 @@
         }
         .reply-cancel:hover { color: #fff; }
         /* 表情按钮 + 悬浮表情面板 */
-        .emote-btn {
+        .comment-composer .emote-btn {
             flex-shrink: 0;
             width: 36px;
             height: 36px;
-            padding: 0;
+            padding: 0 !important;
+            margin-right: 0;
             display: flex;
             align-items: center;
             justify-content: center;
             background: transparent;
-            color: #999999;
-            border: 1px solid #333333;
-            border-radius: 6px;
+            color: #aaaaaa;
+            border: none;
+            cursor: pointer;
         }
-        .emote-btn:hover {
-            background: rgba(255, 255, 255, .08);
+        .comment-composer .emote-btn:hover {
             color: #FB7299;
         }
         .emote-panel {
@@ -1112,7 +1141,7 @@
 
             <nav class="top-nav">
                 <a class="top-nav-item active" href="/search">首页</a>
-                <button type="button" class="top-nav-item" data-placeholder="直播">直播</button>
+                <a class="top-nav-item" href="/live">直播</a>
             </nav>
 
             <div class="header-search-wrap">
@@ -1141,12 +1170,12 @@
                     </svg>
                 </button>
 
-                <button type="button" class="user-icon" title="消息" data-placeholder="消息">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.6"/>
-                        <path d="M4 7l8 5 8-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-                    </svg>
-                </button>
+                <a class="user-icon" href="/message" title="消息">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M4 7l8 5 8-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </a>
 
                 <a class="user-icon" href="/account?tab=fav" title="收藏">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1277,15 +1306,16 @@
                 </button>
             </div>
 
-            <!-- UP 主关注组件（头像 + 名字 + 关注+） -->
+            <!-- UP 主关注组件（stream 风格：大头像 + 名字 + 粉丝数 + 关注按钮） -->
             <div class="up-follow" id="upFollow">
                 <a class="up-avatar-link" id="upAvatarLink" href="javascript:void(0)" title="UP主主页">
                     <img id="upAvatarImg" src="" alt="" referrerpolicy="no-referrer" />
                 </a>
                 <div class="up-info">
                     <div class="up-name" id="upName"></div>
-                    <button class="follow-btn" id="followBtn" type="button">关注+</button>
+                    <div class="up-fans" id="upFans"></div>
                 </div>
+                <button class="follow-btn" id="followBtn" type="button">关注+</button>
             </div>
 
             <div class="search-box">
@@ -1510,6 +1540,28 @@
             return `${y}-${mm}-${dd} ${hh}:${mi}`;
         }
 
+        function renderMetaLine(el, data) {
+            el.innerHTML = '';
+            if (!data) { el.style.display = 'none'; return; }
+            let has = false;
+            const PLAY_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.6"/><path d="M10 9.2v5.6c0 .4.45.66.8.44l4.5-2.8a.52.52 0 0 0 0-.88l-4.5-2.8a.52.52 0 0 0-.8.44Z" fill="currentColor"/></svg>';
+            const DM_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.6"/><path d="M7 9.5h10M7 13h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+            if (Number(data.play) > 0) {
+                has = true;
+                el.insertAdjacentHTML('beforeend', `<span class="meta-item">${PLAY_ICON}${formatRelatedCount(data.play)}</span>`);
+            }
+            const dm = data.stat?.danmaku ?? data.danmaku;
+            if (Number(dm) > 0) {
+                has = true;
+                el.insertAdjacentHTML('beforeend', `<span class="meta-item">${DM_ICON}${formatRelatedCount(dm)}</span>`);
+            }
+            if (data.pubdate) {
+                has = true;
+                el.insertAdjacentHTML('beforeend', `<span class="meta-item">${formatDateTime(data.pubdate)}</span>`);
+            }
+            el.style.display = has ? 'flex' : 'none';
+        }
+
         function renderEpisodeBox(pages, activePage) {
             const episodeBox = document.getElementById('episodeBox');
             const episodeList = document.getElementById('episodeList');
@@ -1610,7 +1662,19 @@
             setFollowState(false);
 
             box.classList.add('show');
-            if (mid) loadFollowState(mid);
+            if (mid) {
+                loadFollowState(mid);
+                loadUpFans(mid);
+            }
+        }
+
+        async function loadUpFans(mid) {
+            const fansEl = document.getElementById('upFans');
+            try {
+                const r = await fetch(`/api/user/${encodeURIComponent(mid)}`);
+                const d = await r.json();
+                if (Number(d.follower) > 0) fansEl.textContent = formatRelatedCount(d.follower) + ' 粉丝';
+            } catch { fansEl.textContent = ''; }
         }
 
         // 关注 / 取消关注
@@ -1993,6 +2057,30 @@
             if (!e.target.closest('.comment-composer')) panel.remove();
         });
 
+        async function sendDanmaku() {
+            if (!currentCid) { alert('请先播放一个视频'); return; }
+            const input = document.getElementById('dmInput');
+            const msg = input.value.trim();
+            if (!msg) return;
+            const btn = document.getElementById('dmSendBtn');
+            btn.disabled = true;
+            const progress = (art && art.video) ? art.video.currentTime : 0;
+            const color = document.querySelector('input[name="dmColor"]:checked')?.value || '16777215';
+            const mode = document.querySelector('input[name="dmMode"]:checked')?.value || '1';
+            try {
+                const res = await fetch('/api/danmaku/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cid: currentCid, bvid: currentBvid, msg, progress, color, mode }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || '发送失败');
+                input.value = '';
+                showToast('弹幕已发送');
+            } catch (e) { alert(e.message || '弹幕发送失败'); }
+            finally { btn.disabled = false; }
+        }
+
         async function sendComment() {
             if (!currentAid) { alert('请先解析一个视频'); return; }
             const input = document.getElementById('commentInput');
@@ -2067,6 +2155,20 @@
             if (el.scrollTop + el.clientHeight >= el.scrollHeight - 120) loadMoreComments();
         }
 
+        // 从消息页跳转过来时，定位并高亮目标评论
+        function highlightTargetComment() {
+            const rp = new URLSearchParams(location.search).get('highlight_rpid');
+            if (!rp) return;
+            // 先在已渲染的评论里找
+            let el = document.querySelector(`.comment-item[data-rpid="${rp}"]`);
+            if (!el) el = document.querySelector(`[data-rpid="${rp}"]`);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.classList.add('comment-highlight');
+                setTimeout(() => el && el.classList.remove('comment-highlight'), 4000);
+            }
+        }
+
         async function loadComments(paramType, cleanId) {
             const box = document.getElementById('commentBox');
             const scroll = document.getElementById('commentScroll');
@@ -2102,6 +2204,7 @@
                 scroll.innerHTML = data.list.map(commentHTML).join('');
                 commentNextCursor = data.next;
                 commentIsEnd = data.isEnd;
+                highlightTargetComment();
 
                 if (!isLoggedIn) {
                     // 未登录：B 站只放出前几条评论
@@ -2473,6 +2576,41 @@
                 screenshot: true,
                 theme: '#ffffff',
                 moreVideoAttr: { crossOrigin: 'anonymous' },
+                controls: [
+                    {
+                        position: 'right',
+                        html: `<div class="art-dm-input-wrap">
+                            <button class="dm-style-btn" type="button" title="弹幕样式">A</button>
+                            <div class="dm-style-pop" style="display:none">
+                                <div class="dm-style-row"><span>颜色</span>
+                                    <label><input type="radio" name="dmColor" value="16777215" checked><i style="background:#fff"></i></label>
+                                    <label><input type="radio" name="dmColor" value="16737280"><i style="background:#FE0303"></i></label>
+                                    <label><input type="radio" name="dmColor" value="57651"><i style="background:#00A1D6"></i></label>
+                                    <label><input type="radio" name="dmColor" value="3394611"><i style="background:#3349B3"></i></label>
+                                    <label><input type="radio" name="dmColor" value="6704896"><i style="background:#6649B0"></i></label>
+                                    <label><input type="radio" name="dmColor" value="16711904"><i style="background:#FF4D94"></i></label>
+                                    <label><input type="radio" name="dmColor" value="16752640"><i style="background:#FF981F"></i></label>
+                                </div>
+                                <div class="dm-style-row"><span>位置</span>
+                                    <label><input type="radio" name="dmMode" value="1" checked>滚动</label>
+                                    <label><input type="radio" name="dmMode" value="4">底部</label>
+                                    <label><input type="radio" name="dmMode" value="5">顶部</label>
+                                </div>
+                            </div>
+                            <input type="text" id="dmInput" maxlength="30" placeholder="发个友善的弹幕" autocomplete="off">
+                            <button id="dmSendBtn">发送</button>
+                        </div>`,
+                        mounted: $control => {
+                            const input = $control.querySelector('#dmInput');
+                            const styleBtn = $control.querySelector('.dm-style-btn');
+                            const pop = $control.querySelector('.dm-style-pop');
+                            styleBtn.addEventListener('click', e => { e.stopPropagation(); pop.style.display = pop.style.display === 'none' ? 'block' : 'none'; });
+                            document.addEventListener('click', e => { if (!pop.contains(e.target)) pop.style.display = 'none'; });
+                            input.addEventListener('keydown', e => { if (e.key === 'Enter') sendDanmaku(); });
+                            $control.querySelector('#dmSendBtn').addEventListener('click', sendDanmaku);
+                        },
+                    },
+                ],
                 plugins: [
                     artplayerPluginDanmuku({
                         danmuku: currentDanmakuList,
@@ -2976,15 +3114,9 @@
                     document.getElementById('videoTitle').textContent =
                         data.code === 0 ? data.title : '';
 
-                    // 视频发布时间（需要 /api/info 返回 pubdate 字段）
+                    // 播放量 + 发布时间（标题下方一行）
                     const pubEl = document.getElementById('videoPubdate');
-                    if (data.code === 0 && data.pubdate) {
-                        pubEl.textContent = formatDateTime(data.pubdate);
-                        pubEl.style.display = 'block';
-                    } else {
-                        pubEl.textContent = '';
-                        pubEl.style.display = 'none';
-                    }
+                    renderMetaLine(pubEl, data.code === 0 ? data : null);
 
                     renderDescBox(data.code === 0 ? data.desc : '');
                     renderEpisodeBox(data.code === 0 ? data.pages : [], p);
