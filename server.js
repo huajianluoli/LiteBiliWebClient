@@ -156,13 +156,8 @@ async function biliFetch(url, options = {}, session = null) {
   // 统一 15s 超时，挂了就快速失败让前端降级/重试，而不是死等。
   const started = Date.now();
   try {
-    const res = await fetch(url, { ...options, headers, signal: AbortSignal.timeout(15000) });
-    const ms = Date.now() - started;
-    if (ms > 2000) console.warn(`[慢请求 ${ms}ms]`, String(url).slice(0, 120));
-    return res;
+    return await fetch(url, { ...options, headers, signal: AbortSignal.timeout(15000) });
   } catch (e) {
-    const ms = Date.now() - started;
-    console.warn(`[请求失败 ${ms}ms]`, String(url).slice(0, 120), e.message);
     throw e;
   }
 }
@@ -554,8 +549,66 @@ app.get("/api/search/users", async (req, res) => {
 
     res.json({ total: data.data?.numResults || 0, page, list });
   } catch (e) {
-    console.error(e);
     res.status(500).json({ error: "代理请求失败，请稍后重试" });
+  }
+});
+
+// 番剧搜索：search_type=media_bangumi
+app.get("/api/search/anime", async (req, res) => {
+  const keyword = String(req.query.keyword || "").trim();
+  if (!keyword) return res.status(400).json({ error: "缺少 keyword" });
+  try {
+    const session = getSession(req);
+    const cookie = await ensureCookie();
+    const signed = await signWbi({
+      keyword,
+      search_type: "media_bangumi",
+      page: "1",
+    }, session);
+    const qs = new URLSearchParams(signed).toString();
+    const r = await biliFetch(`https://api.bilibili.com/x/web-interface/search/type?${qs}`, { headers: { Cookie: cookie } }, session);
+    const data = await r.json();
+    if (data.code !== 0) return res.json({ list: [] });
+    const list = (data.data?.result || []).slice(0, 10).map((a) => {
+      const eps = Array.isArray(a.eps) ? a.eps : [];
+      const firstEp = eps[0] || {};
+      return {
+        title: sanitizeTitle(a.title || ""),
+        cover: (a.cover || "").startsWith("//") ? `https:${a.cover}` : (a.cover || ""),
+        mediaId: a.media_id ?? a.season_id ?? null,
+        indexShow: a.index_show || "",
+        styles: Array.isArray(a.styles) ? a.styles.join(" / ") : (a.styles || ""),
+        score: a.media_score?.score || "",
+        epId: firstEp.id || null,
+      };
+    });
+    res.json({ list });
+  } catch (e) {
+    res.json({ list: [] });
+  }
+});
+
+// ep_id 转 bvid（番剧播放用），同时返回全部分集
+app.get("/api/ep2bv", async (req, res) => {
+  const epId = parseInt(req.query.ep, 10);
+  if (!epId) return res.status(400).json({ error: "缺少 ep" });
+  try {
+    const session = getSession(req);
+    const cookie = await ensureCookie();
+    const r = await biliFetch(`https://api.bilibili.com/pgc/view/web/season?ep_id=${epId}`, { headers: { Cookie: cookie } }, session);
+    const data = await r.json();
+    if (data.code !== 0 || !data.result) return res.status(502).json({ error: "解析失败" });
+    const eps = (data.result.episodes || []).map(e => ({
+      epId: e.id,
+      bvid: e.bvid || "",
+      title: e.title || "",
+      longTitle: e.long_title || "",
+      cover: (e.cover || "").startsWith("//") ? `https:${e.cover}` : (e.cover || ""),
+    }));
+    const current = eps.find(e => e.epId === epId) || eps[0] || {};
+    res.json({ bvid: current.bvid || "", aid: current.aid || 0, episodes: eps, seasonTitle: data.result.title || "" });
+  } catch (e) {
+    res.status(500).json({ error: "解析失败" });
   }
 });
 
@@ -727,62 +780,75 @@ async function resolveCid({ aid, bvid, page = 1 }, session = null) {
 }
 
 async function fetchPlayUrl({ aid, bvid, cid, qn }, session = null) {
-  const base = new URL("https://api.bilibili.com/x/player/playurl");
-  base.searchParams.set("avid", String(aid || ""));
-  base.searchParams.set("bvid", bvid || "");
-  base.searchParams.set("cid", String(cid));
-  base.searchParams.set("qn", String(qn || 80));
-  base.searchParams.set("type", "mp4");
-  base.searchParams.set("otype", "json");
-  base.searchParams.set("fnver", "0");
-  base.searchParams.set("fourk", "1");
-  base.searchParams.set("platform", "html5");
-  base.searchParams.set("high_quality", "1");
+  const buildBase = (pgc) => {
+    const u = new URL(pgc
+      ? "https://api.bilibili.com/pgc/player/web/playurl"
+      : "https://api.bilibili.com/x/player/playurl");
+    u.searchParams.set("avid", String(aid || ""));
+    u.searchParams.set("bvid", bvid || "");
+    u.searchParams.set("cid", String(cid));
+    u.searchParams.set("qn", String(qn || 80));
+    u.searchParams.set("type", "mp4");
+    u.searchParams.set("otype", "json");
+    u.searchParams.set("fnver", "0");
+    u.searchParams.set("fourk", "1");
+    u.searchParams.set("platform", "html5");
+    u.searchParams.set("high_quality", "1");
+    return u;
+  };
 
-  // 先走 DASH（fnval=16）。手机后端每次请求都贵，不再并行多发 durl；
-  // 只有 DASH 拿不到可用视频流时，才补一发 durl（fnval=0）兜底。
-  const dashUrl = new URL(base.toString());
-  dashUrl.searchParams.set("fnval", "16");
-  const dashRes = await biliFetch(dashUrl.toString(), {}, session).then(r => r.json()).catch(() => null);
-  let dashData = (dashRes && dashRes.code === 0) ? dashRes.data : null;
+  async function tryOne(pgc) {
+    const base = buildBase(pgc);
+    const headers = pgc ? { Referer: "https://www.bilibili.com/bangumi/play/" } : {};
+    const dashUrl = new URL(base.toString());
+    dashUrl.searchParams.set("fnval", pgc ? "4048" : "16");
+    const dashRes = await biliFetch(dashUrl.toString(), { headers }, session).then(r => r.json()).catch(() => null);
+    let dashData = (dashRes && dashRes.code === 0) ? (dashRes.result || dashRes.data) : null;
 
-  let dash = null;
-  if (dashData?.dash?.video?.length) {
-    // qn 是"清晰度选择"的选择结果：DASH 通常一次性把已授权的所有清晰度都返回，
-    // 这里按用户选的 qn 去挑对应的那一路，找不到就退回第一路（最高画质）。
-    const wanted = qn ? dashData.dash.video.find((v) => Number(v.id) === Number(qn)) : null;
-    const video = wanted || dashData.dash.video[0];
-    const audio = dashData.dash.audio?.[0];
-    dash = {
-      video: video.baseUrl || video.base_url,
-      audio: audio ? (audio.baseUrl || audio.base_url) : null,
-      videoId: video.id,
-      audioId: audio ? audio.id : null,
+    let dash = null;
+    if (dashData?.dash?.video?.length) {
+      const wanted = qn ? dashData.dash.video.find((v) => Number(v.id) === Number(qn)) : null;
+      const video = wanted || dashData.dash.video[0];
+      const audio = dashData.dash.audio?.[0];
+      dash = {
+        video: video.baseUrl || video.base_url,
+        audio: audio ? (audio.baseUrl || audio.base_url) : null,
+        videoId: video.id,
+        audioId: audio ? audio.id : null,
+      };
+    }
+
+    let fallbackUrl = "";
+    // DASH 响应里如果直接带了 durl（PGC 常见），先用它
+    if (!dash && dashData?.durl?.length) {
+      fallbackUrl = dashData.durl[0].url;
+    }
+    if (!dash && !fallbackUrl) {
+      const durlUrl = new URL(base.toString());
+      durlUrl.searchParams.set("fnval", "0");
+      const durlRes = await biliFetch(durlUrl.toString(), { headers }, session).then(r => r.json()).catch(() => null);
+      const durlData = (durlRes && durlRes.code === 0) ? (durlRes.result || durlRes.data) : null;
+      if (durlData?.durl?.length) fallbackUrl = durlData.durl[0].url;
+    }
+
+    if (!dash && !fallbackUrl) return null;
+    const qualitySource = dashData || { accept_quality: [], accept_description: [] };
+    return {
+      quality: dash ? dash.videoId : qualitySource.quality,
+      accept_quality: qualitySource.accept_quality,
+      accept_description: qualitySource.accept_description,
+      dash,
+      fallbackUrl,
     };
   }
 
-  let durlData = null;
-  let fallbackUrl = "";
-  if (!dash) {
-    const durlUrl = new URL(base.toString());
-    durlUrl.searchParams.set("fnval", "0");
-    const durlRes = await biliFetch(durlUrl.toString(), {}, session).then(r => r.json()).catch(() => null);
-    durlData = (durlRes && durlRes.code === 0) ? durlRes.data : null;
-    if (durlData?.durl?.length) fallbackUrl = durlData.durl[0].url;
-  }
+  let result = await tryOne(false);
+  if (!result) result = await tryOne(true); // PGC 番剧兜底
 
-  if (!dash && !fallbackUrl) {
+  if (!result) {
     throw new Error("未获取到可播放的直链");
   }
-
-  const qualitySource = dashData || durlData;
-  return {
-    quality: dash ? dash.videoId : qualitySource.quality,
-    accept_quality: qualitySource.accept_quality,
-    accept_description: qualitySource.accept_description,
-    dash,
-    fallbackUrl,
-  };
+  return result;
 }
 
 app.get("/api/play", async (req, res) => {
@@ -960,6 +1026,37 @@ app.get("/api/audio/proxy", async (req, res) => {
   } catch (e) {
     console.error(e);
     if (!res.headersSent) res.status(502).json({ error: "音频代理失败" });
+  }
+});
+
+app.get("/api/video/proxy", async (req, res) => {
+  const src = String(req.query.src || "");
+  let target;
+  try { target = new URL(src); } catch { return res.status(400).json({ error: "非法地址" }); }
+  if (target.protocol !== "https:" || !AUDIO_PROXY_ALLOWED_HOST_RE.test(target.hostname)) {
+    return res.status(403).json({ error: "不允许的地址" });
+  }
+  try {
+    const upHeaders = {
+      "User-Agent": COMMON_HEADERS["User-Agent"],
+      Referer: "https://www.bilibili.com/",
+    };
+    if (req.headers.range) upHeaders["Range"] = req.headers.range;
+    const upstream = await fetch(target.toString(), { headers: upHeaders });
+    if (!upstream.body) return res.status(502).json({ error: "视频拉取失败" });
+    res.status(upstream.status);
+    for (const h of ["content-type", "content-length", "content-range", "accept-ranges"]) {
+      const v = upstream.headers.get(h);
+      if (v) res.setHeader(h, v);
+    }
+    if (!upstream.headers.get("accept-ranges")) res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    const stream = Readable.fromWeb(upstream.body);
+    stream.on("error", () => { try { res.destroy(); } catch {} });
+    stream.pipe(res);
+    res.on("error", () => { try { stream.destroy(); } catch {} });
+  } catch (e) {
+    if (!res.headersSent) res.status(502).json({ error: "视频代理失败" });
   }
 });
 
@@ -1263,13 +1360,11 @@ app.post("/api/comments/send", async (req, res) => {
   const parent = String(req.body.parent || "").trim();
   if (!aid || !message) return res.status(400).json({ error: "缺少 aid 或评论内容" });
   try {
-    console.log("[评论] 收到发送请求 aid=", aid, "len=", message.length);
     const body = new URLSearchParams({
       oid: String(aid),
       type: "1",
       message,
       plat: "1",
-      jsonp: "jsonp",
       csrf: session.cookies.bili_jct || "",
     });
     if (root) {
@@ -1282,10 +1377,8 @@ app.post("/api/comments/send", async (req, res) => {
       body,
     }, session)).json();
     if (j.code !== 0) {
-      console.error("[评论] 发送失败 code=", j.code, "msg=", j.message);
       return res.status(502).json({ error: (j.message || "发送评论失败") + "（code=" + j.code + "）" });
     }
-    console.log("[评论] 发送成功 rpid=", j.data?.reply?.rpid);
     res.json({ ok: true, reply: j.data?.reply ? normalizeReply(j.data.reply) : null });
   } catch {
     res.status(500).json({ error: "发送评论失败" });
@@ -1474,29 +1567,29 @@ app.post("/api/danmaku/send", async (req, res) => {
       oid: String(cid),
       msg,
       bvid: String(req.body.bvid || ""),
-      progress: String(progress * 1000),
+      progress: String(Math.round(progress * 1000)),
       color: String(req.body.color || "16777215"),
-      fontsize: String(req.body.fontsize || "25"),
-      mode: String(req.body.mode || "1"),
-      rnd: String(Date.now() * 1000),
+      fontsize: "25",
       pool: "0",
+      mode: String(req.body.mode || "1"),
+      rnd: String(Math.floor(Date.now() / 1000)),
       csrf: session.cookies.bili_jct || "",
     };
     const signed = await signWbi(bodyParams, session);
-    const qs = new URLSearchParams(signed).toString();
-    const upstream = await biliFetch(`https://api.bilibili.com/x/v2/dm/post?${qs}`, {
+    const upstream = await biliFetch("https://api.bilibili.com/x/v2/dm/post", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams(bodyParams).toString(),
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Referer": `https://www.bilibili.com/video/${req.body.bvid || ""}`,
+      },
+      body: new URLSearchParams(signed).toString(),
     }, session);
     const j = await upstream.json();
     if (j.code !== 0) {
-      console.error("[弹幕] 发送失败 code=", j.code, "msg=", j.message);
       return res.status(502).json({ error: (j.message || "弹幕发送失败") + "（code=" + j.code + "）" });
     }
     res.json({ ok: true });
   } catch (e) {
-    console.error("[弹幕] 发送异常:", e.message);
     res.status(500).json({ error: "弹幕发送失败" });
   }
 });
@@ -2163,12 +2256,9 @@ app.post("/api/live/send", async (req, res) => {
       },
       body,
     }, session)).json();
-    console.log(`[弹幕] 发送房间${roomid} "${message}" -> code=${j.code} msg=${j.message || ""}`);
-    if (!session.cookies.bili_jct) console.warn("[弹幕] 警告: 无 bili_jct(csrf), 发送必失败");
     if (j.code !== 0) return res.status(502).json({ error: j.message || "弹幕发送失败" });
     res.json({ ok: true });
   } catch (e) {
-    console.error("[弹幕] 发送异常:", e.message);
     res.status(500).json({ error: "弹幕发送失败" });
   }
 });
@@ -2202,18 +2292,19 @@ function pickText(...vals) {
 
 // 回复我的 / @我的 / 收到的赞 —— 三个 feed 结构接近，统一归一化
 function normalizeFeedItem(x) {
-  const user = x.user || x.up_action_text_user || {};
+  const user = x.user || x.up_action_text_user || (x.users?.[0]) || {};
   const item = x.item || {};
   const pic = item.pictures?.[0]?.img_src || item.image || item.item_pic || item.cover || "";
+  const userCount = x.users?.length || (user.nickname ? 1 : 0);
   return {
     id: x.id ?? null,
     actorName: sanitizeTitle(pickText(user.nickname, user.uname, x.nickname)),
     actorFace: normalizeImgUrl(user.avatar || user.face || ""),
     actorMid: Number(user.mid || user.uid || x.uid || 0),
-    actionText: pickText(item.title_prefix, x.reply_type_desc) || "",
-    content: sanitizeTitle(pickText(item.source_content, item.target_reply_content, item.content, item.item_name, item.title)),
+    actionText: sanitizeTitle(pickText(item.title_prefix, x.reply_type_desc)) || (userCount > 1 ? `${userCount} 人赞了` : ""),
+    content: sanitizeTitle(pickText(item.source_content, item.target_reply_content, item.content, item.item_name, item.title, x.item?.reply?.content?.message)),
     thumb: normalizeImgUrl(pic),
-    time: x.reply_time || x.at_time || x.like_time || x.time || 0,
+    time: x.reply_time || x.at_time || x.like_time || x.time || x.like_time || 0,
     uri: item.uri || "",
     bvid: item.bvid || item.uri?.match(/BV[0-9a-zA-Z]+/)?.[0] || "",
     aid: item.oid || item.business_id || 0,
@@ -2222,14 +2313,14 @@ function normalizeFeedItem(x) {
 }
 
 async function fetchFeedList(url, cursorId, session) {
+  const params = { id: String(cursorId || 0), build: "0", mobi_app: "web" };
+  const signed = await signWbi(params, session);
   const u = new URL(url);
-  u.searchParams.set("id", String(cursorId || 0));
-  u.searchParams.set("build", "0");
-  u.searchParams.set("mobi_app", "web");
+  Object.entries(signed).forEach(([k, v]) => u.searchParams.set(k, String(v)));
   const j = await (await biliFetch(u.toString(), {}, session)).json();
   if (j.code !== 0) throw Object.assign(new Error(j.message || String(j.code)), { code: j.code });
-  const items = (j.data?.items || []).map(normalizeFeedItem);
-  const cursor = j.data?.cursor || {};
+  const items = (j.data?.items || j.data?.total?.items || j.data?.latest?.items || []).map(normalizeFeedItem);
+  const cursor = j.data?.cursor || j.data?.total?.cursor || {};
   return { items, hasMore: !cursor.is_end, nextId: cursor.id || 0 };
 }
 
@@ -2397,22 +2488,30 @@ app.post("/api/message/upload-image", async (req, res) => {
     req.on("end", async () => {
       const buf = Buffer.concat(chunks);
       const fd = new FormData();
-      fd.append("file_up", new Blob([buf]), "image.png");
-      const upstream = await fetch("https://api.vc.bilibili.com/vc_api/v1/draw/image", {
+      fd.append("file_up", new Blob([buf], { type: "image/png" }), "image.png");
+      fd.append("category", "daily");
+      fd.append("csrf", session.cookies.bili_jct || "");
+      const upstream = await fetch("https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs", {
         method: "POST",
-        headers: { Cookie: cookieHeader({ ...parseCookieString(cachedCookie || ""), ...session.cookies }), "User-Agent": COMMON_HEADERS["User-Agent"] },
+        headers: {
+          Cookie: cookieHeader({ ...parseCookieString(cachedCookie || ""), ...session.cookies }),
+          "User-Agent": COMMON_HEADERS["User-Agent"],
+          "Referer": "https://t.bilibili.com/",
+          "Origin": "https://t.bilibili.com",
+        },
         body: fd,
         signal: AbortSignal.timeout(15000),
       });
-      const j = await upstream.json();
+      const text = await upstream.text();
+      let j;
+      try { j = JSON.parse(text); } catch { return res.status(502).json({ error: "图片上传失败: 服务器返回异常" }); }
       if (j.code !== 0) {
-        console.error("[图片] 上传失败 code=", j.code, "msg=", j.msg);
-        return res.status(502).json({ error: "图片上传失败: " + (j.msg || j.code) });
+        return res.status(502).json({ error: "图片上传失败: " + (j.message || j.msg || j.code) });
       }
-      res.json({ url: j.data?.image_url || j.data?.url || "", width: j.data?.image_width || 0, height: j.data?.image_height || 0 });
+      const url = j.data?.image_url || j.data?.url || j.data?.img_url || "";
+      res.json({ url, width: j.data?.image_width || j.data?.width || 0, height: j.data?.image_height || j.data?.height || 0 });
     });
   } catch (e) {
-    console.error("[图片] 上传异常:", e.message);
     res.status(500).json({ error: "图片上传失败" });
   }
 });
@@ -2544,9 +2643,7 @@ try {
     let info;
     try {
       info = await fetchDanmuEndpoint(roomId, session);
-      console.log(`[弹幕] 房间 ${roomId} getDanmuInfo 成功, host=${info.host_list?.[0]?.host}, realRoom=${info.realRoomId}, 登录态=${!!session}`);
     } catch (e) {
-      console.warn(`[弹幕] 房间 ${roomId} getDanmuInfo 失败: ${e.message} (登录态=${!!session}, SESSDATA=${!!(session && session.cookies && session.cookies.SESSDATA)})`);
       try { ws.send(JSON.stringify({ cmd: "__error", message: "获取弹幕服务器失败: " + (e.message || "") })); } catch {}
       return ws.close();
     }
@@ -2564,7 +2661,7 @@ try {
       if (closed) return;
       let tok;
       try { tok = await fetchDanmuEndpoint(roomId, session); }
-      catch (e) { console.warn(`[弹幕] 房间 ${roomId} 重连取token失败: ${e.message}`); if (!closed) reconnectTimer = setTimeout(connectUpstream, 5000); return; }
+      catch (e) { if (!closed) reconnectTimer = setTimeout(connectUpstream, 5000); return; }
       const host = (tok.host_list && tok.host_list[0] && tok.host_list[0].host) || "broadcastlv.chat.bilibili.com";
       const wssPort = (tok.host_list && tok.host_list[0] && tok.host_list[0].wss_port) || 443;
       try {
@@ -2578,7 +2675,6 @@ try {
       } catch (e) { if (!closed) reconnectTimer = setTimeout(connectUpstream, 5000); return; }
 
       sock.on("open", () => {
-        console.log(`[弹幕] 房间 ${roomId} 已连上 ${host}, 发送 join`);
         const ck = parseCookieString(cachedCookie);
         const buvid = ck.buvid3 || "";
         const uid = Number(session?.cookies?.DedeUserID) || 0;
@@ -2605,7 +2701,6 @@ try {
 
       sock.on("close", (code) => {
         stopHeartbeat();
-        console.log(`[弹幕] 房间 ${roomId} 弹幕服务器断开 code=${code}`);
         if (closed) return;
         reconnectTimer = setTimeout(connectUpstream, 5000);
       });
