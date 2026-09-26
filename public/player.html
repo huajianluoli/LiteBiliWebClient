@@ -1003,6 +1003,8 @@
         }
         .comment-del-btn:hover { color: #FB7299; background: none; }
         .sub-reply .comment-del-btn { margin-left: 6px; }
+        .comment-reply-btn { background: none; border: none; padding: 0; font-size: 12px; color: #666; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+        .comment-reply-btn:hover { color: #FB7299; }
         /* 回复某人时的提示条 */
         .reply-bar {
             display: none;
@@ -1589,6 +1591,31 @@
             });
         }
 
+        function renderBangumiEpisodes(eps, activeBvid) {
+            const episodeBox = document.getElementById('episodeBox');
+            const episodeList = document.getElementById('episodeList');
+            if (!eps || eps.length <= 1) {
+                episodeBox.classList.remove('show');
+                episodeList.classList.remove('show');
+                return;
+            }
+            episodeBox.classList.add('show');
+            episodeList.classList.add('show');
+            episodeList.innerHTML = '';
+            eps.forEach((item) => {
+                const el = document.createElement('div');
+                el.className = 'episode-item' + (item.bvid === activeBvid ? ' active' : '');
+                el.textContent = `${item.title}${item.longTitle ? ' ' + item.longTitle : ''}`;
+                el.onclick = () => {
+                    if (item.bvid) {
+                        document.getElementById('vidInput').value = item.bvid;
+                        startPlay();
+                    }
+                };
+                episodeList.appendChild(el);
+            });
+        }
+
         function toggleDesc() {
             const descText = document.getElementById('descText');
             const descToggle = document.getElementById('descToggle');
@@ -1933,6 +1960,7 @@
                                 <span class="comment-like-count-num">${formatRelatedCount(item.like)}</span>
                             </button>
                             <span class="comment-time">${formatCommentDate(item.ctime)}</span>
+                            <button class="comment-reply-btn" data-rpid="${item.rpid}" data-uname="${esc(item.uname)}">回复</button>
                             ${delBtn}
                         </div>
                         ${repliesBlock}
@@ -2076,6 +2104,18 @@
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || '发送失败');
                 input.value = '';
+                // 立即把弹幕显示在播放器上，不用等刷新
+                try {
+                    const dmPlugin = art.plugins?.artplayerPluginDanmuku;
+                    if (dmPlugin && dmPlugin.emit) {
+                        dmPlugin.emit({
+                            text: msg,
+                            time: progress,
+                            color: '#' + parseInt(color, 10).toString(16).padStart(6, '0'),
+                            mode: parseInt(mode, 10),
+                        });
+                    }
+                } catch (e) { console.warn('弹幕即时显示失败', e); }
                 showToast('弹幕已发送');
             } catch (e) { alert(e.message || '弹幕发送失败'); }
             finally { btn.disabled = false; }
@@ -2276,6 +2316,14 @@
             const delBtn = e.target.closest('.comment-del-btn');
             if (delBtn) {
                 deleteComment(delBtn);
+                return;
+            }
+
+            // 点"回复"按钮
+            const replyBtn = e.target.closest('.comment-reply-btn');
+            if (replyBtn) {
+                setReplyTarget({ root: replyBtn.dataset.rpid, parent: replyBtn.dataset.rpid, uname: replyBtn.dataset.uname || '' });
+                document.getElementById('commentInput').focus();
                 return;
             }
 
@@ -2558,7 +2606,11 @@
 
             const isDash = !!(playInfo.dash && playInfo.dash.video);
             // 非 DASH 时兼容两种来源：显式 url（降级时）或 fallbackUrl（纯 durl 视频）
-            const videoUrl = isDash ? playInfo.dash.video : (playInfo.url || playInfo.fallbackUrl);
+            let videoUrl = isDash ? playInfo.dash.video : (playInfo.url || playInfo.fallbackUrl);
+            // PGC 番剧的 MP4 直链需要 Referer，走后端代理
+            if (!isDash && videoUrl && videoUrl.includes('bilivideo.com')) {
+                videoUrl = '/api/video/proxy?src=' + encodeURIComponent(videoUrl);
+            }
 
             const dmOpt = Object.assign({}, DM_DEFAULTS, loadDanmakuSettings());
 
@@ -2576,41 +2628,6 @@
                 screenshot: true,
                 theme: '#ffffff',
                 moreVideoAttr: { crossOrigin: 'anonymous' },
-                controls: [
-                    {
-                        position: 'right',
-                        html: `<div class="art-dm-input-wrap">
-                            <button class="dm-style-btn" type="button" title="弹幕样式">A</button>
-                            <div class="dm-style-pop" style="display:none">
-                                <div class="dm-style-row"><span>颜色</span>
-                                    <label><input type="radio" name="dmColor" value="16777215" checked><i style="background:#fff"></i></label>
-                                    <label><input type="radio" name="dmColor" value="16737280"><i style="background:#FE0303"></i></label>
-                                    <label><input type="radio" name="dmColor" value="57651"><i style="background:#00A1D6"></i></label>
-                                    <label><input type="radio" name="dmColor" value="3394611"><i style="background:#3349B3"></i></label>
-                                    <label><input type="radio" name="dmColor" value="6704896"><i style="background:#6649B0"></i></label>
-                                    <label><input type="radio" name="dmColor" value="16711904"><i style="background:#FF4D94"></i></label>
-                                    <label><input type="radio" name="dmColor" value="16752640"><i style="background:#FF981F"></i></label>
-                                </div>
-                                <div class="dm-style-row"><span>位置</span>
-                                    <label><input type="radio" name="dmMode" value="1" checked>滚动</label>
-                                    <label><input type="radio" name="dmMode" value="4">底部</label>
-                                    <label><input type="radio" name="dmMode" value="5">顶部</label>
-                                </div>
-                            </div>
-                            <input type="text" id="dmInput" maxlength="30" placeholder="发个友善的弹幕" autocomplete="off">
-                            <button id="dmSendBtn">发送</button>
-                        </div>`,
-                        mounted: $control => {
-                            const input = $control.querySelector('#dmInput');
-                            const styleBtn = $control.querySelector('.dm-style-btn');
-                            const pop = $control.querySelector('.dm-style-pop');
-                            styleBtn.addEventListener('click', e => { e.stopPropagation(); pop.style.display = pop.style.display === 'none' ? 'block' : 'none'; });
-                            document.addEventListener('click', e => { if (!pop.contains(e.target)) pop.style.display = 'none'; });
-                            input.addEventListener('keydown', e => { if (e.key === 'Enter') sendDanmaku(); });
-                            $control.querySelector('#dmSendBtn').addEventListener('click', sendDanmaku);
-                        },
-                    },
-                ],
                 plugins: [
                     artplayerPluginDanmuku({
                         danmuku: currentDanmakuList,
@@ -2618,7 +2635,30 @@
                         color: '#ffffff',
                         mode: 0,
                         heatmap: false,
-                        emitter: false,
+                        emitter: true,
+                        send: async (danmu) => {
+                            if (!currentCid) return false;
+                            const text = (danmu.text || '').trim();
+                            if (!text) return false;
+                            try {
+                                const res = await fetch('/api/danmaku/send', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        cid: currentCid,
+                                        bvid: currentBvid,
+                                        msg: text,
+                                        progress: Math.max(0, Math.round((Number(danmu.time) || 0) * 1000)),
+                                        color: typeof danmu.color === 'string' ? parseInt(danmu.color.replace('#',''), 16) : 16777215,
+                                        mode: String(danmu.mode || 1),
+                                    }),
+                                });
+                                const data = await res.json();
+                                if (!res.ok) { showToast(data.error || '弹幕发送失败'); return false; }
+                                showToast('弹幕已发送');
+                                return true;
+                            } catch (e) { showToast('弹幕发送失败'); return false; }
+                        },
                     }),
                 ],
             });
@@ -3119,7 +3159,12 @@
                     renderMetaLine(pubEl, data.code === 0 ? data : null);
 
                     renderDescBox(data.code === 0 ? data.desc : '');
-                    renderEpisodeBox(data.code === 0 ? data.pages : [], p);
+                    // 番剧分集优先（从 ep2bv 拿到的），否则用普通多 P
+                    if (window._episodes && window._episodes.length > 1) {
+                        renderBangumiEpisodes(window._episodes, currentBvid);
+                    } else {
+                        renderEpisodeBox(data.code === 0 ? data.pages : [], p);
+                    }
 
                     // UP 主信息（mid / face 需要 /api/info 返回；缺失时按钮仍显示但无法跳转）
                     renderUpFollow(data.code === 0 ? {
@@ -3209,13 +3254,27 @@
             }
         }
 
-        window.onload = function() {
+        window.onload = async function() {
             const params = new URLSearchParams(window.location.search);
             const bv = params.get('bv');
             const av = params.get('av');
+            const ep = params.get('ep');
             const p = params.get('p');
 
-            if (bv || av) {
+            if (ep) {
+                // 番剧：先解析 ep_id 拿 bvid 和分集列表
+                try {
+                    const r = await fetch(`/api/ep2bv?ep=${ep}`);
+                    const d = await r.json();
+                    if (d.bvid) {
+                        document.getElementById('vidInput').value = d.bvid;
+                        window._episodes = d.episodes || [];
+                        window._seasonTitle = d.seasonTitle || '';
+                        if (p) currentPage = parseInt(p, 10) || 1;
+                        startPlay();
+                    }
+                } catch (e) {}
+            } else if (bv || av) {
                 document.getElementById('vidInput').value = bv || `av${av}`;
                 if (p) currentPage = parseInt(p, 10) || 1;
                 startPlay();

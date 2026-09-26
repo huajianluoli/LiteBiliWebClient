@@ -75,6 +75,9 @@
   .im-chat-messages { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; overscroll-behavior: contain; padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
   .im-msg-row { display: flex; gap: 8px; max-width: 78%; }
   .im-msg-row.mine { align-self: flex-end; flex-direction: row-reverse; }
+  .im-msg-content { display: flex; flex-direction: column; gap: 2px; }
+  .im-msg-row.mine .im-msg-content { align-items: flex-end; }
+  .im-msg-time { font-size: 10px; color: #999; }
   .im-msg-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; background: #e7e8ea; flex-shrink: 0; }
   .im-msg-bubble { background: var(--bg); color: var(--text); padding: 9px 13px; border-radius: 10px; font-size: 13px; line-height: 1.6; word-break: break-all; }
   .im-msg-row.mine .im-msg-bubble { background: var(--pink); color: #fff; }
@@ -469,10 +472,20 @@ function renderMsgRow(m, otherFace) {
     bubble = `<div class="im-msg-bubble">${renderEmojiText(m.text || '')}</div>`;
   }
   const face = mine ? myFace : otherFace;
+  const ts = m.timestamp ? `<div class="im-msg-time">${formatMsgTime(m.timestamp)}</div>` : '';
   return `<div class="im-msg-row ${mine ? 'mine' : ''}">
     <img class="im-msg-avatar" src="${faceUrl(face)}" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'">
-    ${bubble}
+    <div class="im-msg-content">${bubble}${ts}</div>
   </div>`;
+}
+
+function formatMsgTime(ts) {
+  const d = new Date(ts * 1000);
+  const now = new Date();
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  if (d.toDateString() === now.toDateString()) return `${hh}:${mm}`;
+  return `${d.getMonth()+1}/${d.getDate()} ${hh}:${mm}`;
 }
 
 // 把 [doge] 这类表情文本替换成图片
@@ -488,6 +501,9 @@ function renderEmojiText(text) {
 let chatSeq = 0;
 async function openChat(talkerId, uname, face, sessionType) {
   currentTalker = talkerId;
+  if (!emoteCache) loadEmotePanel();
+  // 清除会话未读角标
+  document.querySelectorAll(`.session-item[data-talker="${talkerId}"] .unread-badge`).forEach(b => b.remove());
   const mySeq = ++chatSeq;
   sessionType = sessionType || 1;
   const chat = document.getElementById('imChat');
