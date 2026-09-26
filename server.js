@@ -144,6 +144,10 @@ async function biliFetch(url, options = {}, session = null) {
     const merged = { ...base, ...session.cookies };
     cookieStr = cookieHeader(merged);
   } else {
+    // 匿名请求也需要 buvid3，否则直播/搜索等接口会 -352。ensureCookie 内部有缓存。
+    if (!cachedCookie) {
+      try { await ensureCookie(); } catch {}
+    }
     cookieStr = cachedCookie;
   }
 
@@ -539,6 +543,14 @@ app.get("/api/search/users", async (req, res) => {
       videos: u.videos ?? null,
       level: u.level ?? null,
     }));
+
+    // 批量补直播状态，供 UP 卡片显示"直播中"角标
+    const liveMap = await fetchLiveStatusByUids(list.map((u) => u.mid), session);
+    for (const u of list) {
+      const live = liveMap[String(u.mid)];
+      u.liveStatus = live?.liveStatus ?? 0;
+      u.roomId = live?.roomId ?? null;
+    }
 
     res.json({ total: data.data?.numResults || 0, page, list });
   } catch (e) {
@@ -937,7 +949,14 @@ app.get("/api/audio/proxy", async (req, res) => {
     if (!upstream.headers.get("accept-ranges")) res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Cache-Control", "public, max-age=3600");
 
-    Readable.fromWeb(upstream.body).pipe(res);
+    const upstreamStream = Readable.fromWeb(upstream.body);
+    upstreamStream.on("error", (e) => {
+      // 上游 HTTP2 中途断流（NGHTTP2_PROTOCOL_ERROR 等）会在这里冒泡成 unhandled error 直接崩进程。
+      console.warn("[音频代理] 上游流中断:", e.message);
+      try { res.destroy(); } catch {}
+    });
+    upstreamStream.pipe(res);
+    res.on("error", () => { try { upstreamStream.destroy(); } catch {} });
   } catch (e) {
     console.error(e);
     if (!res.headersSent) res.status(502).json({ error: "音频代理失败" });
@@ -1244,10 +1263,12 @@ app.post("/api/comments/send", async (req, res) => {
   const parent = String(req.body.parent || "").trim();
   if (!aid || !message) return res.status(400).json({ error: "缺少 aid 或评论内容" });
   try {
+    console.log("[评论] 收到发送请求 aid=", aid, "len=", message.length);
     const body = new URLSearchParams({
       oid: String(aid),
       type: "1",
       message,
+      plat: "1",
       jsonp: "jsonp",
       csrf: session.cookies.bili_jct || "",
     });
@@ -1260,7 +1281,11 @@ app.post("/api/comments/send", async (req, res) => {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
     }, session)).json();
-    if (j.code !== 0) return res.status(502).json({ error: j.message || "发送评论失败" });
+    if (j.code !== 0) {
+      console.error("[评论] 发送失败 code=", j.code, "msg=", j.message);
+      return res.status(502).json({ error: (j.message || "发送评论失败") + "（code=" + j.code + "）" });
+    }
+    console.log("[评论] 发送成功 rpid=", j.data?.reply?.rpid);
     res.json({ ok: true, reply: j.data?.reply ? normalizeReply(j.data.reply) : null });
   } catch {
     res.status(500).json({ error: "发送评论失败" });
@@ -1297,9 +1322,10 @@ app.post("/api/comments/delete", async (req, res) => {
 // 登录后返回默认表情 + 用户已购买 / 大会员专属表情。匿名也能拿到默认表情。
 app.get("/api/emotes", async (req, res) => {
   const session = getSession(req);
+  const business = req.query.business || "reply";
   try {
     const j = await (await biliFetch(
-      "https://api.bilibili.com/x/emote/user/panel/web?business=reply",
+      `https://api.bilibili.com/x/emote/user/panel/web?business=${encodeURIComponent(business)}`,
       {},
       session
     )).json();
@@ -1431,6 +1457,47 @@ app.get("/api/danmaku", async (req, res) => {
     res.json({ total: list.length, list });
   } catch {
     res.status(500).json({ error: "获取弹幕失败" });
+  }
+});
+
+// 发送视频弹幕。POST https://api.bilibili.com/x/v2/dm/post，需登录 cookie + csrf。
+app.post("/api/danmaku/send", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  const cid = parseInt(req.body.cid, 10) || 0;
+  const msg = String(req.body.msg || "").trim().slice(0, 30);
+  const progress = Number(req.body.progress) || 0; // 秒
+  if (!cid || !msg) return res.status(400).json({ error: "缺少 cid 或弹幕内容" });
+  try {
+    const bodyParams = {
+      type: "1",
+      oid: String(cid),
+      msg,
+      bvid: String(req.body.bvid || ""),
+      progress: String(progress * 1000),
+      color: String(req.body.color || "16777215"),
+      fontsize: String(req.body.fontsize || "25"),
+      mode: String(req.body.mode || "1"),
+      rnd: String(Date.now() * 1000),
+      pool: "0",
+      csrf: session.cookies.bili_jct || "",
+    };
+    const signed = await signWbi(bodyParams, session);
+    const qs = new URLSearchParams(signed).toString();
+    const upstream = await biliFetch(`https://api.bilibili.com/x/v2/dm/post?${qs}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(bodyParams).toString(),
+    }, session);
+    const j = await upstream.json();
+    if (j.code !== 0) {
+      console.error("[弹幕] 发送失败 code=", j.code, "msg=", j.message);
+      return res.status(502).json({ error: (j.message || "弹幕发送失败") + "（code=" + j.code + "）" });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("[弹幕] 发送异常:", e.message);
+    res.status(500).json({ error: "弹幕发送失败" });
   }
 });
 
@@ -1834,6 +1901,562 @@ app.get("/api/user/:mid/videos", async (req, res) => {
   res.status(502).json({ code: failed?.code, error: spaceErrorText(failed?.code, failed?.message || "投稿视频获取失败") });
 });
 
+// ============================= 直播 =============================
+// 数据来源（2026-09）：
+//   - 房间信息：api.live.bilibili.com/room/v1/Room/get_info（匿名可用）
+//   - 主播信息：api.live.bilibili.com/live_user/v1/Master/info（匿名可用）
+//   - 批量直播状态：api.live.bilibili.com/room/v1/Room/get_status_info_by_uids（按 uid 批量查，匿名可用）
+//   - 关注的正在直播的 UP：api.live.bilibili.com/relation/v1/feed/getList（需登录）
+//   - 首页/分区推荐直播：api.live.bilibili.com/xlive/web-interface/v1/second/getList（匿名可用）
+//   - 取流（HLS）：api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo（匿名可用，登录可获取更高清晰度）
+// 这些接口不在原始接口清单里，是本次按 2026-09 实测/开源客户端资料补的，字段可能随官方调整变化。
+
+function normalizeLiveRoom(r) {
+  return {
+    roomId: r.roomid ?? r.room_id ?? r.roomId ?? null,
+    uid: r.uid ?? null,
+    uname: sanitizeTitle(r.uname || r.owner_name || ""),
+    face: normalizeImgUrl(r.face || r.uface || ""),
+    title: sanitizeTitle(r.title || ""),
+    cover: normalizeImgUrl(r.cover || r.system_cover || r.user_cover || ""),
+    online: r.online ?? null,
+    area: r.area_name || r.area_name_v2 || r.area_v2_name || "",
+    parentArea: r.parent_name || r.parent_area_name || r.area_v2_parent_name || "",
+  };
+}
+
+// 按 uid 批量查直播状态：{ [uid]: { liveStatus, roomId, title, cover, online, uname, face } }
+async function fetchLiveStatusByUids(uids, session) {
+  const list = Array.from(new Set((uids || []).map((n) => parseInt(n, 10)).filter(Boolean))).slice(0, 50);
+  if (!list.length) return {};
+  try {
+    const body = new URLSearchParams();
+    list.forEach((uid) => body.append("uids[]", String(uid)));
+    const r = await biliFetch("https://api.live.bilibili.com/room/v1/Room/get_status_info_by_uids", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    }, session);
+    const j = await r.json();
+    if (j.code !== 0 || !j.data) return {};
+    const out = {};
+    for (const [uid, d] of Object.entries(j.data)) {
+      out[uid] = {
+        liveStatus: d.live_status ?? 0,
+        roomId: d.room_id ?? null,
+        title: sanitizeTitle(d.title || ""),
+        cover: normalizeImgUrl(d.cover_from_user || d.cover || ""),
+        online: d.online ?? null,
+        uname: sanitizeTitle(d.uname || ""),
+        face: normalizeImgUrl(d.face || ""),
+      };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+// 批量查直播状态：GET ?uids=1,2,3（供 search.html 的 UP 卡片、account.html 头像角标使用）
+app.get("/api/live/status", async (req, res) => {
+  const uids = String(req.query.uids || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!uids.length) return res.json({});
+  const session = getSession(req);
+  res.json(await fetchLiveStatusByUids(uids, session));
+});
+
+// 关注的、正在直播的 UP 主（左栏）
+// 原来用的 relation/v1/feed/getList 已失效（控制器里没这个方法）。
+// 改用：关注列表 x/relation/followings 拿 mid，再批量查 get_status_info_by_uids 过滤开播的。
+app.get("/api/live/followed", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  try {
+    const selfMid = session.cookies && (session.cookies.DedeUserID || session.cookies.DedeUserID__ckMd5);
+    if (!selfMid) return res.status(401).json({ error: "无法获取当前用户" });
+
+    // 取关注列表前 50 个（按关注时间倒序，侧边栏够用）
+    const fu = new URL("https://api.bilibili.com/x/relation/followings");
+    fu.searchParams.set("vmid", String(selfMid));
+    fu.searchParams.set("pn", "1");
+    fu.searchParams.set("ps", "50");
+    fu.searchParams.set("order", "desc");
+    const fj = await (await biliFetch(fu.toString(), {}, session)).json();
+    if (fj.code !== 0 || !fj.data) return res.status(502).json({ error: `获取关注列表失败: ${fj.message || fj.code}` });
+    const mids = (fj.data.list || []).map((u) => u.mid).filter(Boolean);
+
+    const status = await fetchLiveStatusByUids(mids, session);
+    const list = Object.entries(status)
+      .filter(([, s]) => s.liveStatus === 1 && s.roomId)
+      .map(([uid, s]) => ({
+        roomId: s.roomId,
+        uid: Number(uid),
+        uname: s.uname,
+        face: s.face,
+        title: s.title,
+        cover: s.cover,
+        online: s.online,
+        area: "",
+        parentArea: "",
+      }));
+    res.json({ list });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "获取关注直播失败" });
+  }
+});
+
+// 推荐直播（右栏 / 未登录兜底）
+app.get("/api/live/recommend", async (req, res) => {
+  const session = getSession(req);
+  try {
+    // second/getList 现在对匿名请求一律 -352；改用直播首页 index/getList（匿名可用），
+    // 它返回多个模块，其中"推荐直播"模块的 list 就是要展示的房间列表。
+    const u = new URL("https://api.live.bilibili.com/xlive/web-interface/v1/index/getList");
+    u.searchParams.set("platform", "web");
+    const j = await (await biliFetch(u.toString(), {}, session)).json();
+    if (j.code !== 0) return res.status(502).json({ error: `获取推荐直播失败: ${j.message || j.code}` });
+    const modules = j.data?.room_list || [];
+    let rooms = [];
+    for (const m of modules) {
+      if (m.module_info?.title === "推荐直播" && Array.isArray(m.list)) { rooms = m.list; break; }
+    }
+    if (!rooms.length) rooms = modules.flatMap((m) => m.list || []);
+    const list = rooms.map(normalizeLiveRoom).filter((r) => r.roomId);
+    res.json({ list });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "获取推荐直播失败" });
+  }
+});
+
+// 直播间信息（stream.html 顶部信息 / 关注按钮）
+app.get("/api/live/room", async (req, res) => {
+  const roomId = parseInt(req.query.room_id, 10) || 0;
+  if (!roomId) return res.status(400).json({ error: "缺少 room_id" });
+  const session = getSession(req);
+  try {
+    const u = new URL("https://api.live.bilibili.com/room/v1/Room/get_info");
+    u.searchParams.set("room_id", String(roomId));
+    const j = await (await biliFetch(u.toString(), {}, session)).json();
+    if (j.code !== 0 || !j.data) return res.status(502).json({ error: `直播间信息获取失败: ${j.message || j.code}` });
+    const d = j.data;
+    let master = {};
+    try {
+      const mu = new URL("https://api.live.bilibili.com/live_user/v1/Master/info");
+      mu.searchParams.set("uid", String(d.uid));
+      const mj = await (await biliFetch(mu.toString(), {}, session)).json();
+      if (mj.code === 0 && mj.data) master = mj.data;
+    } catch {}
+    res.json({
+      roomId: d.room_id,
+      uid: d.uid,
+      title: sanitizeTitle(d.title || ""),
+      cover: normalizeImgUrl(d.user_cover || d.cover || ""),
+      liveStatus: d.live_status ?? 0, // 0 未开播 1 直播中 2 轮播
+      online: d.online ?? null,
+      areaName: d.area_name || "",
+      parentAreaName: d.parent_area_name || "",
+      uname: sanitizeTitle(master.info?.uname || ""),
+      face: normalizeImgUrl(master.info?.face || ""),
+      follower: master.follower_num ?? null,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "获取直播间信息失败" });
+  }
+});
+
+// 取流：优先 HLS（供 artplayer + hls.js 播放），带 flv 兜底地址
+app.get("/api/live/play", async (req, res) => {
+  const roomId = parseInt(req.query.room_id, 10) || 0;
+  if (!roomId) return res.status(400).json({ error: "缺少 room_id" });
+  const qn = parseInt(req.query.qn, 10) || 10000;
+  const session = getSession(req);
+  try {
+    const u = new URL("https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo");
+    u.searchParams.set("room_id", String(roomId));
+    u.searchParams.set("protocol", "0,1");
+    u.searchParams.set("format", "0,1,2");
+    u.searchParams.set("codec", "0,1");
+    u.searchParams.set("qn", String(qn));
+    u.searchParams.set("platform", "web");
+    u.searchParams.set("ptype", "8");
+    const j = await (await biliFetch(u.toString(), {}, session)).json();
+    if (j.code !== 0 || !j.data) return res.status(502).json({ error: `取流失败: ${j.message || j.code}` });
+    const d = j.data;
+    if (d.live_status !== 1) return res.status(409).json({ error: "主播未开播", liveStatus: d.live_status ?? 0 });
+
+    const playurl = d.playurl_info?.playurl || {};
+    // 可用清晰度列表：优先用接口的 g_qn_desc，否则用 B 站标准 qn 映射表
+    const QN_NAME = { 30000: "杜比", 20000: "4K", 10000: "原画", 400: "蓝光", 250: "超清", 150: "高清", 80: "流畅" };
+    const acceptQn = playurl.accept_qn || [];
+    let qnDesc = playurl.g_qn_desc || [];
+    // 兜底：若接口没给 g_qn_desc，用映射表按 accept_qn 生成
+    if ((!qnDesc || !qnDesc.length) && acceptQn.length) {
+      qnDesc = acceptQn.map((qn) => ({ qn, desc: QN_NAME[qn] || String(qn) }));
+    }
+    const qualities = qnDesc
+      .filter((q) => acceptQn.length === 0 || acceptQn.includes(q.qn))
+      .map((q) => ({ qn: q.qn, desc: q.desc || QN_NAME[q.qn] || String(q.qn) }))
+      .sort((a, b) => b.qn - a.qn);
+
+    const streams = playurl.stream || [];
+    let hlsUrl = "", flvUrl = "";
+    for (const s of streams) {
+      const isHls = s.protocol_name === "http_hls";
+      for (const f of (s.format || [])) {
+        for (const c of (f.codec || [])) {
+          const info = (c.url_info || [])[0];
+          if (!info) continue;
+          const full = `${info.host}${c.base_url}${info.extra}`;
+          if (isHls && !hlsUrl) hlsUrl = full;
+          if (!isHls && !flvUrl) flvUrl = full;
+        }
+      }
+    }
+    if (!hlsUrl && !flvUrl) return res.status(502).json({ error: "未获取到可用的直播流地址" });
+    res.json({ hlsUrl, flvUrl, liveStatus: d.live_status ?? 1, qualities, currentQn: qn });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "获取直播流失败" });
+  }
+});
+
+// ============================= 消息中心 =============================
+// 数据来源（bilibili-API-collect，message/ 目录，2026-09 复核仍可用）：
+//   - 未读汇总：api.bilibili.com/x/msgfeed/unread
+//   - 回复我的：api.bilibili.com/x/msgfeed/reply
+//   - @我的：   api.bilibili.com/x/msgfeed/at
+//   - 收到的赞：api.bilibili.com/x/msgfeed/like
+//   - 私信会话列表 / 系统通知会话：api.vc.bilibili.com/session_svr/v1/session_svr/get_sessions
+//     （session_type: 1 私聊 2 系统通知 3 应援团）
+//   - 私信未读数：api.vc.bilibili.com/session_svr/v1/session_svr/single_unread
+//   - 会话消息记录：api.vc.bilibili.com/svr_sync/v1/svr_sync/fetch_session_msgs
+//   - 发送私信：   api.vc.bilibili.com/web_im/v1/web_im/send_msg
+// 这些接口字段在社区文档里也标注"部分不明确"，前端做了容错渲染，取不到的字段直接跳过。
+
+// 发送直播弹幕。POST https://api.live.bilibili.com/msg/send，需登录 cookie + csrf。
+app.post("/api/live/send", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  const roomid = parseInt(req.body.roomid, 10) || 0;
+  const message = String(req.body.message || "").trim().slice(0, 30);
+  if (!roomid || !message) return res.status(400).json({ error: "缺少房间号或弹幕内容" });
+  try {
+    const body = new URLSearchParams({
+      color: "16777215",
+      fontsize: "25",
+      mode: "1",
+      bubble: "0",
+      msg: message,
+      rnd: String(Math.floor(Date.now() / 1000)),
+      roomid: String(roomid),
+      csrf: session.cookies.bili_jct || "",
+      csrf_token: session.cookies.bili_jct || "",
+    });
+    const j = await (await biliFetch("https://api.live.bilibili.com/msg/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Referer: `https://live.bilibili.com/${roomid}`,
+      },
+      body,
+    }, session)).json();
+    console.log(`[弹幕] 发送房间${roomid} "${message}" -> code=${j.code} msg=${j.message || ""}`);
+    if (!session.cookies.bili_jct) console.warn("[弹幕] 警告: 无 bili_jct(csrf), 发送必失败");
+    if (j.code !== 0) return res.status(502).json({ error: j.message || "弹幕发送失败" });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("[弹幕] 发送异常:", e.message);
+    res.status(500).json({ error: "弹幕发送失败" });
+  }
+});
+
+app.get("/api/message/unread", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  try {
+    const [feedJ, sessJ] = await Promise.all([
+      (await biliFetch("https://api.bilibili.com/x/msgfeed/unread", {}, session)).json(),
+      (await biliFetch("https://api.vc.bilibili.com/session_svr/v1/session_svr/single_unread", {}, session)).json(),
+    ]);
+    const feed = feedJ.code === 0 ? feedJ.data : {};
+    const sess = sessJ.code === 0 ? sessJ.data : {};
+    res.json({
+      chat: (sess.follow_unread || 0) + (sess.unfollow_unread || 0),
+      reply: feed.reply || 0,
+      at: feed.at || 0,
+      like: feed.like || 0,
+      sysMsg: feed.sys_msg || 0,
+    });
+  } catch (e) {
+    res.status(500).json({ error: "获取未读消息数失败" });
+  }
+});
+
+function pickText(...vals) {
+  for (const v of vals) { if (typeof v === "string" && v) return v; }
+  return "";
+}
+
+// 回复我的 / @我的 / 收到的赞 —— 三个 feed 结构接近，统一归一化
+function normalizeFeedItem(x) {
+  const user = x.user || x.up_action_text_user || {};
+  const item = x.item || {};
+  const pic = item.pictures?.[0]?.img_src || item.image || item.item_pic || item.cover || "";
+  return {
+    id: x.id ?? null,
+    actorName: sanitizeTitle(pickText(user.nickname, user.uname, x.nickname)),
+    actorFace: normalizeImgUrl(user.avatar || user.face || ""),
+    actorMid: Number(user.mid || user.uid || x.uid || 0),
+    actionText: pickText(item.title_prefix, x.reply_type_desc) || "",
+    content: sanitizeTitle(pickText(item.source_content, item.target_reply_content, item.content, item.item_name, item.title)),
+    thumb: normalizeImgUrl(pic),
+    time: x.reply_time || x.at_time || x.like_time || x.time || 0,
+    uri: item.uri || "",
+    bvid: item.bvid || item.uri?.match(/BV[0-9a-zA-Z]+/)?.[0] || "",
+    aid: item.oid || item.business_id || 0,
+    rpid: item.target_reply_id || x.id || 0,
+  };
+}
+
+async function fetchFeedList(url, cursorId, session) {
+  const u = new URL(url);
+  u.searchParams.set("id", String(cursorId || 0));
+  u.searchParams.set("build", "0");
+  u.searchParams.set("mobi_app", "web");
+  const j = await (await biliFetch(u.toString(), {}, session)).json();
+  if (j.code !== 0) throw Object.assign(new Error(j.message || String(j.code)), { code: j.code });
+  const items = (j.data?.items || []).map(normalizeFeedItem);
+  const cursor = j.data?.cursor || {};
+  return { items, hasMore: !cursor.is_end, nextId: cursor.id || 0 };
+}
+
+app.get("/api/message/reply", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  try {
+    res.json(await fetchFeedList("https://api.bilibili.com/x/msgfeed/reply", req.query.cursor, session));
+  } catch (e) { res.status(502).json({ error: "获取回复消息失败: " + e.message }); }
+});
+app.get("/api/message/at", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  try {
+    res.json(await fetchFeedList("https://api.bilibili.com/x/msgfeed/at", req.query.cursor, session));
+  } catch (e) { res.status(502).json({ error: "获取 @ 消息失败: " + e.message }); }
+});
+app.get("/api/message/like", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  try {
+    res.json(await fetchFeedList("https://api.bilibili.com/x/msgfeed/like", req.query.cursor, session));
+  } catch (e) { res.status(502).json({ error: "获取点赞消息失败: " + e.message }); }
+});
+
+// 用户名片小缓存：私信会话列表按 talker_id 批量补头像/昵称，避免同一个人反复请求
+const cardCache = new Map(); // mid -> { data, at }
+const CARD_TTL_MS = 10 * 60 * 1000;
+async function fetchCardCached(mid, session) {
+  const hit = cardCache.get(mid);
+  if (hit && Date.now() - hit.at < CARD_TTL_MS) return hit.data;
+  try {
+    const u = new URL("https://api.bilibili.com/x/web-interface/card");
+    u.searchParams.set("mid", String(mid));
+    u.searchParams.set("photo", "false");
+    const j = await (await biliFetch(u.toString(), {}, session)).json();
+    const data = j.code === 0 && j.data?.card
+      ? { uname: sanitizeTitle(j.data.card.name || ""), face: normalizeImgUrl(j.data.card.face || "") }
+      : { uname: `用户${mid}`, face: "" };
+    cardCache.set(mid, { data, at: Date.now() });
+    return data;
+  } catch {
+    return { uname: `用户${mid}`, face: "" };
+  }
+}
+
+// 有限并发的 map，避免几十个会话同时打满出站请求
+async function mapLimit(list, limit, fn) {
+  const out = new Array(list.length);
+  let i = 0;
+  async function worker() {
+    while (i < list.length) {
+      const idx = i++;
+      out[idx] = await fn(list[idx], idx);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, list.length) }, worker));
+  return out;
+}
+
+function parseMsgContent(msgType, content) {
+  try {
+    const j = JSON.parse(content);
+    if (msgType === 1) return { type: "text", text: j.content || "" };
+    if (msgType === 2) return { type: "image", url: normalizeImgUrl(j.url || ""), width: j.width, height: j.height };
+    if (msgType === 5) return { type: "revoke" };
+    return { type: "other", raw: j };
+  } catch {
+    return { type: "text", text: String(content || "") };
+  }
+}
+
+// 会话列表：session_type 1=私聊（我的消息） 2=系统通知
+app.get("/api/message/sessions", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  const sessionType = req.query.type === "2" ? 2 : 1;
+  try {
+    const u = new URL("https://api.vc.bilibili.com/session_svr/v1/session_svr/get_sessions");
+    u.searchParams.set("session_type", String(sessionType));
+    u.searchParams.set("group_fold", "1");
+    u.searchParams.set("unfollow_fold", "0");
+    u.searchParams.set("sort_rule", "2");
+    u.searchParams.set("build", "0");
+    u.searchParams.set("mobi_app", "web");
+    const j = await (await biliFetch(u.toString(), {}, session)).json();
+    if (j.code !== 0) return res.status(502).json({ error: `获取会话列表失败: ${j.message || j.code}` });
+    const rawList = j.data?.session_list || [];
+    const list = await mapLimit(rawList, 6, async (s) => {
+      const card = await fetchCardCached(s.talker_id, session);
+      const lastMsg = s.last_msg || {};
+      const parsed = parseMsgContent(lastMsg.msg_type, lastMsg.content);
+      return {
+        talkerId: s.talker_id,
+        uname: card.uname,
+        face: card.face,
+        unreadCount: s.unread_count || 0,
+        lastMsgPreview: parsed.type === "text" ? parsed.text : parsed.type === "image" ? "[图片]" : parsed.type === "revoke" ? "[消息已撤回]" : "",
+        lastMsgTime: lastMsg.timestamp || 0,
+      };
+    });
+    res.json({ list });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "获取会话列表失败" });
+  }
+});
+
+// 某个会话的消息记录（默认取最近 30 条）
+app.get("/api/message/history", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  const talkerId = parseInt(req.query.talker_id, 10) || 0;
+  const sessionType = req.query.type === "2" ? 2 : 1;
+  if (!talkerId) return res.status(400).json({ error: "缺少 talker_id" });
+  try {
+    const u = new URL("https://api.vc.bilibili.com/svr_sync/v1/svr_sync/fetch_session_msgs");
+    u.searchParams.set("talker_id", String(talkerId));
+    u.searchParams.set("session_type", String(sessionType));
+    u.searchParams.set("size", "30");
+    if (req.query.begin_seqno) u.searchParams.set("begin_seqno", String(req.query.begin_seqno));
+    const j = await (await biliFetch(u.toString(), {}, session)).json();
+    if (j.code !== 0) return res.status(502).json({ error: `获取消息记录失败: ${j.message || j.code}` });
+    const myMid = Number(session.cookies.DedeUserID || 0);
+    const list = (j.data?.messages || []).map((m) => ({
+      senderUid: m.sender_uid,
+      isMine: Number(m.sender_uid) === myMid,
+      seqno: m.msg_seqno,
+      timestamp: m.timestamp,
+      ...parseMsgContent(m.msg_type, m.content),
+    })).reverse();
+    res.json({ list });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "获取消息记录失败" });
+  }
+});
+
+function randomDevId() {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  }).toUpperCase();
+}
+
+// 表情面板：转发 B 站表情接口
+app.get("/api/emote/panel", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  try {
+    const j = await (await biliFetch("https://api.bilibili.com/x/emote/user/panel?web_location=1315875&business=1", {}, session)).json();
+    res.json(j);
+  } catch (e) {
+    res.status(500).json({ error: "获取表情失败" });
+  }
+});
+
+// 私信图片上传：转发到 B 站图片接口
+app.post("/api/message/upload-image", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  try {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", async () => {
+      const buf = Buffer.concat(chunks);
+      const fd = new FormData();
+      fd.append("file_up", new Blob([buf]), "image.png");
+      const upstream = await fetch("https://api.vc.bilibili.com/vc_api/v1/draw/image", {
+        method: "POST",
+        headers: { Cookie: cookieHeader({ ...parseCookieString(cachedCookie || ""), ...session.cookies }), "User-Agent": COMMON_HEADERS["User-Agent"] },
+        body: fd,
+        signal: AbortSignal.timeout(15000),
+      });
+      const j = await upstream.json();
+      if (j.code !== 0) {
+        console.error("[图片] 上传失败 code=", j.code, "msg=", j.msg);
+        return res.status(502).json({ error: "图片上传失败: " + (j.msg || j.code) });
+      }
+      res.json({ url: j.data?.image_url || j.data?.url || "", width: j.data?.image_width || 0, height: j.data?.image_height || 0 });
+    });
+  } catch (e) {
+    console.error("[图片] 上传异常:", e.message);
+    res.status(500).json({ error: "图片上传失败" });
+  }
+});
+
+app.post("/api/message/send", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  if (!session.cookies.bili_jct) return res.status(401).json({ code: -111, error: "缺少 CSRF 凭据，请重新登录" });
+  const receiverId = parseInt(req.body.talker_id, 10) || 0;
+  const text = String(req.body.content || "").trim();
+  const imgUrl = String(req.body.image_url || "").trim();
+  if (!receiverId || (!text && !imgUrl)) return res.status(400).json({ error: "缺少 talker_id 或 content" });
+  const myMid = Number(session.cookies.DedeUserID || 0);
+  if (!myMid) return res.status(401).json({ error: "登录态缺少 DedeUserID" });
+  try {
+    const isImage = !!imgUrl;
+    const msgType = isImage ? "2" : "1";
+    const contentObj = isImage
+      ? { url: imgUrl, width: Number(req.body.image_width) || 0, height: Number(req.body.image_height) || 0 }
+      : { content: text };
+    const body = new URLSearchParams({
+      "msg[sender_uid]": String(myMid),
+      "msg[receiver_id]": String(receiverId),
+      "msg[receiver_type]": "1",
+      "msg[msg_type]": msgType,
+      "msg[msg_status]": "0",
+      "msg[dev_id]": randomDevId(),
+      "msg[timestamp]": String(Math.floor(Date.now() / 1000)),
+      "msg[content]": JSON.stringify(contentObj),
+      csrf: session.cookies.bili_jct,
+    });
+    const j = await (await biliFetch("https://api.vc.bilibili.com/web_im/v1/web_im/send_msg", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    }, session)).json();
+    if (j.code !== 0) return res.status(502).json({ error: `发送失败: ${j.msg || j.message || j.code}` });
+    res.json({ ok: true, msgKey: j.data?.msg_key || null });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "发送失败（网络异常）" });
+  }
+});
+
 // ----------------------------- 环境诊断（排查平板/WebView 登录问题） -----------------------------
 app.get("/api/diag/set-cookie", (req, res) => {
   res.cookie("diag_cookie", "ok", { httpOnly: true, path: "/", maxAge: 60000, sameSite: "lax" });
@@ -1855,15 +2478,162 @@ app.get("/", (req, res) => res.redirect("/search"));
 app.get("/search", (req, res) => res.sendFile(path.join(__dirname, "public", "search.html")));
 app.get("/player", (req, res) => res.sendFile(path.join(__dirname, "public", "player.html")));
 app.get("/account", (req, res) => res.sendFile(path.join(__dirname, "public", "account.html")));
+app.get("/live", (req, res) => res.sendFile(path.join(__dirname, "public", "live.html")));
+app.get("/stream", (req, res) => res.sendFile(path.join(__dirname, "public", "stream.html")));
+app.get("/message", (req, res) => res.sendFile(path.join(__dirname, "public", "message.html")));
 
-app.listen(PORT, () => {
+// ----------------------------- 直播弹幕转发（WebSocket） -----------------------------
+// 浏览器不方便直接连 B 站直播弹幕协议（二进制帧），所以由服务端先调 getDanmuInfo
+// 拿到弹幕服务器地址 + token，再带 token 建立 WebSocket，解析后转发给前端。
+// 老版 bilibili-live-ws 写死连 broadcastlv.chat.bilibili.com 且 join 不带 token，
+// 现在一连上就被 B 站断开（OPEN→CLOSE），所以这里自己按官方流程连，只复用它的编解码。
+const httpServer = require("http").createServer(app);
+let LiveBuffer = null;
+try {
+  LiveBuffer = require("bilibili-live-ws/src/buffer");
+} catch {
+  console.warn("[直播弹幕] 未找到 bilibili-live-ws 依赖，请先 npm install 后重启");
+}
+
+async function fetchDanmuEndpoint(roomId, session) {
+  if (!cachedCookie) { try { await ensureCookie(); } catch {} }
+  const params = { id: String(roomId), type: "0" };
+  const signed = await signWbi(params, session);
+  const u = new URL("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo");
+  for (const [k, v] of Object.entries(signed)) u.searchParams.set(k, String(v));
+  const headers = { Referer: `https://live.bilibili.com/${roomId}` };
+  let j = await (await biliFetch(u.toString(), { headers }, session)).json();
+  // 偶发 -352 风控：清掉旧 buvid3 重新取一次再试
+  if (j.code === -352) {
+    cachedCookie = ""; cookieFetchedAt = 0;
+    try { await ensureCookie(); } catch {}
+    j = await (await biliFetch(u.toString(), { headers }, session)).json();
+  }
+  if (j.code !== 0 || !j.data) throw new Error(j.message || "getDanmuInfo 失败");
+  // join 包必须用真实 room_id（短号会被服务器立刻断开 1006），用 room_init 解析。
+  let realRoomId = roomId;
+  try {
+    const ri = await (await biliFetch(`https://api.live.bilibili.com/room/v1/Room/room_init?id=${roomId}`, { headers }, session)).json();
+    if (ri.code === 0 && ri.data && ri.data.room_id) realRoomId = ri.data.room_id;
+  } catch {}
+  return { ...j.data, realRoomId }; // { token, host_list, realRoomId }
+}
+
+try {
+  const { WebSocketServer, WebSocket } = require("ws");
+  const wss = new WebSocketServer({ server: httpServer, path: "/ws/live" });
+  wss.on("connection", async (ws, req) => {
+    const urlp = new URL(req.url, "http://x");
+    let roomId = 0;
+    try { roomId = parseInt(urlp.searchParams.get("room_id"), 10) || 0; } catch {}
+    if (!roomId || !LiveBuffer) {
+      try { ws.send(JSON.stringify({ cmd: "__error", message: "弹幕转发服务不可用" })); } catch {}
+      return ws.close();
+    }
+    // 浏览器把整串 B 站 cookie 放在 query 里带过来（WebSocket 不能自定义 header），
+    // 登录态调 getDanmuInfo 能显著降低 -352 风控概率。
+    let session = null;
+    try {
+      const rawCookie = urlp.searchParams.get("cookie") || "";
+      if (rawCookie) {
+        const cookies = parseCookieString(rawCookie);
+        if (cookies.SESSDATA) session = { cookies, user: null, createdAt: 0, lastSeen: 0 };
+      }
+    } catch {}
+
+    let info;
+    try {
+      info = await fetchDanmuEndpoint(roomId, session);
+      console.log(`[弹幕] 房间 ${roomId} getDanmuInfo 成功, host=${info.host_list?.[0]?.host}, realRoom=${info.realRoomId}, 登录态=${!!session}`);
+    } catch (e) {
+      console.warn(`[弹幕] 房间 ${roomId} getDanmuInfo 失败: ${e.message} (登录态=${!!session}, SESSDATA=${!!(session && session.cookies && session.cookies.SESSDATA)})`);
+      try { ws.send(JSON.stringify({ cmd: "__error", message: "获取弹幕服务器失败: " + (e.message || "") })); } catch {}
+      return ws.close();
+    }
+
+    // WS 握手要带 cookie（浏览器会自动带，Node 不会），否则风控直接断 1006
+    const wsCookie = [cachedCookie, session ? Object.entries(session.cookies).map(([k, v]) => `${k}=${v}`).join("; ") : ""].filter(Boolean).join("; ");
+
+    let sock = null;
+    let heartbeatTimer = null;
+    let closed = false;
+    let reconnectTimer = null;
+    const stopHeartbeat = () => { if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; } };
+
+    async function connectUpstream() {
+      if (closed) return;
+      let tok;
+      try { tok = await fetchDanmuEndpoint(roomId, session); }
+      catch (e) { console.warn(`[弹幕] 房间 ${roomId} 重连取token失败: ${e.message}`); if (!closed) reconnectTimer = setTimeout(connectUpstream, 5000); return; }
+      const host = (tok.host_list && tok.host_list[0] && tok.host_list[0].host) || "broadcastlv.chat.bilibili.com";
+      const wssPort = (tok.host_list && tok.host_list[0] && tok.host_list[0].wss_port) || 443;
+      try {
+        sock = new WebSocket(`wss://${host}:${wssPort}/sub`, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+            Origin: "https://live.bilibili.com",
+            Cookie: wsCookie,
+          },
+        });
+      } catch (e) { if (!closed) reconnectTimer = setTimeout(connectUpstream, 5000); return; }
+
+      sock.on("open", () => {
+        console.log(`[弹幕] 房间 ${roomId} 已连上 ${host}, 发送 join`);
+        const ck = parseCookieString(cachedCookie);
+        const buvid = ck.buvid3 || "";
+        const uid = Number(session?.cookies?.DedeUserID) || 0;
+        sock.send(LiveBuffer.encoder({
+          type: "join",
+          body: { uid, roomid: tok.realRoomId || roomId, protover: 2, buvid, platform: "web", type: 2, key: tok.token },
+        }));
+        stopHeartbeat();
+        heartbeatTimer = setInterval(() => { try { sock.send(LiveBuffer.encoder({ type: "heartbeat" })); } catch {} }, 30000);
+      });
+
+      sock.on("message", async (buffer) => {
+        let packs;
+        try { packs = await LiveBuffer.decoder(buffer); } catch (e) { return; }
+        for (const pack of packs) {
+          if (pack.type !== "message" || !pack.data) continue;
+          const data = pack.data;
+          const cmd = data.cmd || (data.msg && data.msg.cmd);
+          if (!cmd) continue;
+          if (ws.readyState !== ws.OPEN) continue;
+          try { ws.send(JSON.stringify({ cmd, data })); } catch {}
+        }
+      });
+
+      sock.on("close", (code) => {
+        stopHeartbeat();
+        console.log(`[弹幕] 房间 ${roomId} 弹幕服务器断开 code=${code}`);
+        if (closed) return;
+        reconnectTimer = setTimeout(connectUpstream, 5000);
+      });
+      sock.on("error", () => { stopHeartbeat(); try { sock.close(); } catch {} });
+    }
+
+    ws.on("close", () => { closed = true; stopHeartbeat(); clearTimeout(reconnectTimer); try { sock && sock.close(); } catch {} });
+    ws.on("error", () => { closed = true; stopHeartbeat(); clearTimeout(reconnectTimer); try { sock && sock.close(); } catch {} });
+
+    connectUpstream();
+  });
+} catch {
+  console.warn("[直播弹幕] 未找到 ws 依赖，请先 npm install 后重启");
+}
+
+httpServer.listen(PORT, () => {
   console.log(`服务已启动: http://localhost:${PORT}`);
   console.log(`  搜索页: http://localhost:${PORT}/search`);
   console.log(`  播放页: http://localhost:${PORT}/player`);
   console.log(`  我的:   http://localhost:${PORT}/account`);
+  console.log(`  直播:   http://localhost:${PORT}/live`);
+  console.log(`  消息:   http://localhost:${PORT}/message`);
 });
 
 // 凭证完全在前端 localStorage，服务端无状态，退出无需写盘。
 process.on("SIGINT", () => process.exit(0));
 process.on("SIGTERM", () => process.exit(0));
+// 任何未捕获的异步错误 / 未处理 Promise 拒绝都只记录、不崩进程（Termux 长跑必须）。
+process.on("unhandledRejection", (e) => console.warn("[未处理 Promise]", e && e.message || e));
+process.on("uncaughtException", (e) => console.warn("[未捕获异常]", e && e.message || e));
 //（注：内容由AI生成）
