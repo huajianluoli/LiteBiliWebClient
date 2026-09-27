@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+<script>(function(){try{var isP=/\/(player|stream)/.test(location.pathname);var k=isP?'bili_player_theme':'bili_theme';var d=isP?'dark':'light';var t=localStorage.getItem(k)||d;if(t!=='dark'&&t!=='light')t=d;document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>B站视频解析器</title>
@@ -8,16 +9,16 @@
         :root {
             --header-h: 60px;
             /* 顶栏背景与顶栏图标色互为反色：深色主题 黑底 + 白图标；接入浅色主题时两者一起对调 */
-            --header-bg: #000000;
-            --header-icon-color: #ffffff;
+            --header-bg: var(--g000000);
+            --header-icon-color: var(--gffffff);
         }
 
         * { box-sizing: border-box; }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: #000000;
-            color: #ffffff;
+            background-color: var(--g000000);
+            color: var(--gffffff);
             margin: 0;
             padding: calc(var(--header-h) + 32px) 20px 40px;
             display: flex;
@@ -25,7 +26,7 @@
             align-items: center;
         }
         h2 {
-            color: #ffffff;
+            color: var(--gffffff);
             font-weight: 400;
             letter-spacing: 2px;
             margin-bottom: 30px;
@@ -44,7 +45,7 @@
             z-index: 1000;
             height: var(--header-h);
             background: var(--header-bg);
-            border-bottom: 1px solid #1a1a1a;
+            border-bottom: 1px solid var(--g1a1a1a);
             color: var(--header-icon-color);
         }
         /* 顶栏图标（右侧图标群 + 搜索按钮）统一为"与背景相反的颜色"。
@@ -99,7 +100,7 @@
             border: none;
             background: none;
             border-radius: 8px;
-            color: #dddddd;
+            color: var(--gdddddd);
             font-size: 14px;
             font-family: inherit;
             font-weight: 500;
@@ -109,10 +110,10 @@
         }
         .top-nav-item:hover {
             background: rgba(255, 255, 255, .08);
-            color: #ffffff;
+            color: var(--gffffff);
         }
         .top-nav-item.active {
-            color: #ffffff;
+            color: var(--gffffff);
             font-weight: 650;
         }
         .header-search-wrap {
@@ -126,14 +127,14 @@
             display: flex;
             width: 100%;
             height: 38px;
-            background: #141414;
+            background: var(--g141414);
             border-radius: 19px;
             overflow: hidden;
-            border: 1px solid #232323;
+            border: 1px solid var(--g232323);
             transition: border-color .15s ease;
         }
         .header-search-box:focus-within {
-            border-color: #3a3a3a;
+            border-color: var(--g3a3a3a);
         }
         .header-search-box input {
             flex: 1;
@@ -142,14 +143,14 @@
             outline: none;
             padding: 0 16px;
             font-size: 13px;
-            color: #ffffff;
+            color: var(--gffffff);
             background: transparent;
         }
-        .header-search-box input::placeholder { color: #666666; }
+        .header-search-box input::placeholder { color: var(--g666666); }
         .header-search-box button {
             border: none;
             background: #FB7299;
-            color: #fff;
+            color: var(--gffffff);
             padding: 0 18px;
             cursor: pointer;
             display: flex;
@@ -159,7 +160,7 @@
             font-weight: 600;
             transition: filter .15s ease;
         }
-        .header-search-box button:hover { background: #FB7299; color: #fff; filter: brightness(.94); }
+        .header-search-box button:hover { background: #FB7299; color: var(--gffffff); filter: brightness(.94); }
         .user-actions {
             margin-left: auto;
             display: flex;
@@ -193,7 +194,7 @@
             padding: 0 16px;
             border-radius: 16px;
             background: #FB7299;
-            color: #fff;
+            color: var(--gffffff);
             font-size: 13px;
             font-weight: 600;
             display: inline-flex;
@@ -212,8 +213,8 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            background: #222222;
-            color: #ffffff;
+            background: var(--g222222);
+            color: var(--gffffff);
             font-weight: 600;
             font-size: 13px;
             text-decoration: none;
@@ -233,13 +234,13 @@
             font-size: 18px;
             font-weight: 700;
             line-height: 1.4;
-            color: #ffffff;
+            color: var(--gffffff);
             word-break: break-all;
         }
         /* 视频发布时间 + 播放量（位于大标题下方） */
         .video-meta-line {
             font-size: 12px;
-            color: #888888;
+            color: var(--g888888);
             margin: 0 0 10px;
             letter-spacing: .3px;
             display: flex;
@@ -256,7 +257,7 @@
         }
         .desc-text {
             font-size: 12px;
-            color: #dddddd;
+            color: var(--gdddddd);
             line-height: 1.6;
             white-space: pre-wrap;
             word-break: break-all;
@@ -274,13 +275,13 @@
             padding: 0;
             background: none;
             border: none;
-            color: #888888;
+            color: var(--g888888);
             font-size: 13px;
             cursor: pointer;
         }
         .desc-toggle:hover {
             background: none;
-            color: #ffffff;
+            color: var(--gffffff);
         }
         /* 播放器容器 */
         .player-wrap {
@@ -290,10 +291,10 @@
         #videoPlayer {
             width: 100%;
             height: 450px;
-            border: 1px solid #222222;
+            border: 1px solid var(--g222222);
             border-radius: 8px;
             overflow: hidden;
-            background: #000000;
+            background: var(--g000000);
             display: block;
         }
         /* 听视频降级：/api/audio 失败时用 ArtPlayer 继续出声，但把画面藏起来，不占版面 */
@@ -311,9 +312,9 @@
             display: none;
             width: 100%;
             height: 450px;
-            border: 1px solid #222222;
+            border: 1px solid var(--g222222);
             border-radius: 8px;
-            background: #0a0a0a;
+            background: var(--g0a0a0a);
             box-sizing: border-box;
             padding: 28px;
             gap: 28px;
@@ -327,7 +328,7 @@
             height: 100%;
             border-radius: 10px;
             overflow: hidden;
-            background: #141414;
+            background: var(--g141414);
         }
         .audio-cover {
             width: 100%;
@@ -347,7 +348,7 @@
             margin: 0 0 12px;
             font-size: 22px;
             font-weight: 700;
-            color: #ffffff;
+            color: var(--gffffff);
             line-height: 1.35;
             display: -webkit-box;
             -webkit-line-clamp: 2;
@@ -364,14 +365,14 @@
             padding-top: 8px;
         }
         /* 自定义进度条（不用原生 input[type=range]）：
-           页面里全局的 input{padding:12px 16px;border:1px solid #333;...} 会把原生
+           页面里全局的 input{padding:12px 16px;border:1px solid var(--g333333);...} 会把原生
            range 撑成一根又粗又带边框的丑条，干脆用 div 自己画，样式完全可控。 */
         .audio-seek-track {
             position: relative;
             width: 100%;
             height: 4px;
             border-radius: 2px;
-            background: #333333;
+            background: var(--g333333);
             cursor: pointer;
             touch-action: none;
         }
@@ -402,7 +403,7 @@
             top: -20px;
             transform: translateX(-50%);
             background: rgba(20, 20, 20, .95);
-            color: #ffffff;
+            color: var(--gffffff);
             font-size: 11px;
             padding: 2px 6px;
             border-radius: 4px;
@@ -414,7 +415,7 @@
             display: flex;
             justify-content: space-between;
             font-size: 12px;
-            color: #999999;
+            color: var(--g999999);
         }
         .audio-controls-row {
             display: flex;
@@ -422,7 +423,7 @@
             justify-content: center;
             gap: 26px;
         }
-        /* 页面里全局的 button{padding:12px 30px;background:#fff;...} 优先级比这里的
+        /* 页面里全局的 button{padding:12px 30px;background:var(--gffffff);...} 优先级比这里的
            class 选择器低，所以背景/颜色/圆角能正常覆盖；但 padding 如果不显式清零，
            40px 的按钮会被那份 padding 撑成一个变形的大椭圆（图标看起来就跟没有一样）。
            这里把盒模型相关的属性全部显式重置一遍，不依赖"多数属性已覆盖"的侥幸。 */
@@ -440,7 +441,7 @@
             border-radius: 50%;
             background: transparent;
             background-color: transparent;
-            color: #ffffff;
+            color: var(--gffffff);
             cursor: pointer;
             transition: background .15s ease, color .15s ease, opacity .15s ease;
         }
@@ -459,7 +460,7 @@
             padding: 0;
             background: #FB7299;
             background-color: #FB7299;
-            color: #ffffff;
+            color: var(--gffffff);
         }
         .audio-play-btn:hover { background: #FB7299; filter: brightness(1.08); }
         /* ============ 顶栏听视频入口高亮 ============ */
@@ -488,9 +489,9 @@
             gap: 5px;
             padding: 8px 12px;
             border-radius: 999px;
-            border: 1px solid #292929;
-            background: #141414;
-            color: #ffffff;
+            border: 1px solid var(--g292929);
+            background: var(--g141414);
+            color: var(--gffffff);
             font-size: 12px;
             font-weight: 500;
             cursor: pointer;
@@ -498,8 +499,8 @@
         }
         .player-action-btn svg { flex-shrink: 0; }
         .player-action-btn:hover {
-            background: #1f1f1f;
-            border-color: #3a3a3a;
+            background: var(--g1f1f1f);
+            border-color: var(--g3a3a3a);
         }
         .player-action-btn.like.active { color: #FB7299; border-color: #FB7299; }
         .player-action-btn.coin.active { color: #FFC83D; border-color: #FFC83D; }
@@ -520,12 +521,12 @@
             border-radius: 50%;
             overflow: hidden;
             flex-shrink: 0;
-            background: #1a1a1a;
-            border: 1px solid #222222;
+            background: var(--g1a1a1a);
+            border: 1px solid var(--g222222);
             text-decoration: none;
             transition: border-color .15s ease;
         }
-        .up-avatar-link:hover { border-color: #555555; }
+        .up-avatar-link:hover { border-color: var(--g555555); }
         .up-avatar-link img {
             width: 100%;
             height: 100%;
@@ -542,7 +543,7 @@
         .up-name {
             font-size: 15px;
             font-weight: 600;
-            color: #ffffff;
+            color: var(--gffffff);
             line-height: 1.2;
             white-space: nowrap;
             overflow: hidden;
@@ -551,7 +552,7 @@
         }
         .up-fans {
             font-size: 12px;
-            color: #888888;
+            color: var(--g888888);
             line-height: 1.2;
         }
         .follow-btn {
@@ -561,7 +562,7 @@
             font-size: 13px;
             font-weight: 600;
             background: #FB7299;
-            color: #ffffff;
+            color: var(--gffffff);
             border: none;
             border-radius: 999px;
             cursor: pointer;
@@ -572,16 +573,16 @@
             transition: filter .15s ease, background .15s ease, color .15s ease;
             white-space: nowrap;
         }
-        .follow-btn:hover { background: #FB7299; color: #ffffff; filter: brightness(.92); }
+        .follow-btn:hover { background: #FB7299; color: var(--gffffff); filter: brightness(.92); }
         .follow-btn:disabled { opacity: .6; cursor: default; }
         /* 已关注：灰底 + 深灰字 */
         .follow-btn.followed,
         .follow-btn.followed:hover {
-            background: #3a3a3a;
-            color: #bbb;
+            background: var(--g3a3a3a);
+            color: var(--gbbbbbb);
             filter: none;
         }
-        .follow-btn.followed:hover { background: #444; }
+        .follow-btn.followed:hover { background: var(--g444444); }
 
         /* 解析输入框（宽度压缩，给 UP 主关注组件让位） */
         .search-box {
@@ -593,7 +594,7 @@
         /* 小标题 */
         .section-title {
             font-size: 13px;
-            color: #666666;
+            color: var(--g666666);
             margin-bottom: 12px;
             letter-spacing: 1px;
         }
@@ -614,10 +615,10 @@
             width: 100%;
             max-height: 240px;
             overflow-y: auto;
-            border: 1px solid #222222;
+            border: 1px solid var(--g222222);
             border-radius: 6px;
-            background: #0a0a0a;
-            scrollbar-color: #333333 #000000;
+            background: var(--g0a0a0a);
+            scrollbar-color: var(--g333333) var(--g000000);
         }
         .episode-list.show {
             display: block;
@@ -625,9 +626,9 @@
         .episode-item {
             padding: 10px 16px;
             font-size: 14px;
-            color: #aaaaaa;
+            color: var(--gaaaaaa);
             cursor: pointer;
-            border-bottom: 1px solid #1a1a1a;
+            border-bottom: 1px solid var(--g1a1a1a);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -637,34 +638,34 @@
             border-bottom: none;
         }
         .episode-item:hover {
-            background: #161616;
-            color: #ffffff;
+            background: var(--g161616);
+            color: var(--gffffff);
         }
         .episode-item.active {
-            background: #ffffff;
-            color: #000000;
+            background: var(--gffffff);
+            color: var(--g000000);
         }
         /* 输入框 */
         input {
             flex: 1;
             padding: 12px 16px;
-            background: #000000;
-            border: 1px solid #333333;
+            background: var(--g000000);
+            border: 1px solid var(--g333333);
             border-radius: 6px;
-            color: #ffffff;
+            color: var(--gffffff);
             font-size: 14px;
             outline: none;
             transition: border-color 0.2s;
         }
         input:focus {
-            border-color: #ffffff;
+            border-color: var(--gffffff);
         }
         /* 按钮 */
         button {
             padding: 12px 30px;
-            background-color: #ffffff;
-            color: #000000;
-            border: 1px solid #ffffff;
+            background-color: var(--gffffff);
+            color: var(--g000000);
+            border: 1px solid var(--gffffff);
             border-radius: 6px;
             cursor: pointer;
             font-size: 14px;
@@ -672,8 +673,8 @@
             transition: background 0.2s, color 0.2s;
         }
         button:hover {
-            background-color: #000000;
-            color: #ffffff;
+            background-color: var(--g000000);
+            color: var(--gffffff);
         }
         /* JSON 结果展示区 */
         .json-box {
@@ -683,10 +684,10 @@
         #jsonOutput {
             margin: 0;
             padding: 16px;
-            background: #0a0a0a;
-            border: 1px solid #222222;
+            background: var(--g0a0a0a);
+            border: 1px solid var(--g222222);
             border-radius: 6px;
-            color: #cccccc;
+            color: var(--gcccccc);
             font-family: "SF Mono", Menlo, Consolas, monospace;
             font-size: 13px;
             line-height: 1.5;
@@ -694,12 +695,12 @@
             word-break: break-all;
             max-height: 260px;
             overflow-y: auto;
-            scrollbar-color: #333333 #000000;
+            scrollbar-color: var(--g333333) var(--g000000);
         }
 
         /* 强制覆盖 ArtPlayer 的部分高亮逻辑为纯白极简 */
         .art-video-player .art-control-playtime {
-            color: #ffffff !important;
+            color: var(--gffffff) !important;
         }
         .art-video-player .artplayer-plugin-danmuku {
             font-family: inherit;
@@ -721,7 +722,7 @@
             gap: 12px;
             overflow-x: auto;
             padding-bottom: 6px;
-            scrollbar-color: #333333 #000000;
+            scrollbar-color: var(--g333333) var(--g000000);
         }
         .related-card {
             flex: 0 0 180px;
@@ -734,8 +735,8 @@
             aspect-ratio: 16 / 9;
             border-radius: 6px;
             overflow: hidden;
-            background: #111111;
-            border: 1px solid #222222;
+            background: var(--g111111);
+            border: 1px solid var(--g222222);
         }
         .related-thumb img {
             width: 100%;
@@ -748,7 +749,7 @@
             right: 5px;
             bottom: 5px;
             background: rgba(0, 0, 0, .7);
-            color: #ffffff;
+            color: var(--gffffff);
             font-size: 10px;
             padding: 1px 5px;
             border-radius: 3px;
@@ -758,7 +759,7 @@
             font-size: 13px;
             line-height: 1.4;
             height: 2.8em;
-            color: #cccccc;
+            color: var(--gcccccc);
             overflow: hidden;
             display: -webkit-box;
             -webkit-line-clamp: 2;
@@ -767,11 +768,11 @@
             transition: color 0.15s ease;
         }
         .related-card:hover .related-title {
-            color: #ffffff;
+            color: var(--gffffff);
         }
         .related-meta {
             font-size: 11px;
-            color: #666666;
+            color: var(--g666666);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -780,7 +781,7 @@
             cursor: default;
         }
         .related-skeleton .related-thumb {
-            background: linear-gradient(90deg, #111111, #1c1c1c, #111111);
+            background: linear-gradient(90deg, var(--g111111), var(--g1c1c1c), var(--g111111));
             background-size: 200% 100%;
             animation: relatedShimmer 1.2s infinite;
         }
@@ -789,7 +790,7 @@
             100% { background-position: -200% 0; }
         }
         .related-empty, .related-error {
-            color: #555555;
+            color: var(--g555555);
             font-size: 13px;
             padding: 6px 0;
         }
@@ -802,22 +803,22 @@
         }
         /* 发弹幕栏 */
         .art-dm-input-wrap { display: flex; align-items: center; gap: 6px; margin: 0 8px; position: relative; }
-        .art-dm-input-wrap input { width: 130px; background: rgba(255,255,255,.15); border: none; border-radius: 14px; padding: 4px 12px; font-size: 12px; color: #fff; outline: none; }
+        .art-dm-input-wrap input { width: 130px; background: rgba(255,255,255,.15); border: none; border-radius: 14px; padding: 4px 12px; font-size: 12px; color: var(--gffffff); outline: none; }
         .art-dm-input-wrap input::placeholder { color: rgba(255,255,255,.5); }
-        .art-dm-input-wrap button { background: #FB7299; color: #fff; border: none; border-radius: 14px; padding: 4px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; }
-        .art-dm-input-wrap button:disabled { background: #555; }
-        .dm-style-btn { width: 26px; height: 26px; border-radius: 50%; background: rgba(255,255,255,.15); color: #fff; border: none; font-size: 13px; cursor: pointer; flex-shrink: 0; padding: 0 !important; }
-        .dm-style-pop { position: absolute; bottom: 40px; left: 0; background: #222; border-radius: 8px; padding: 10px; z-index: 10; min-width: 200px; }
-        .dm-style-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; color: #ccc; }
-        .dm-style-row span { color: #888; flex-shrink: 0; }
-        .dm-style-row label { display: flex; align-items: center; gap: 3px; cursor: pointer; color: #ccc; }
+        .art-dm-input-wrap button { background: #FB7299; color: var(--gffffff); border: none; border-radius: 14px; padding: 4px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+        .art-dm-input-wrap button:disabled { background: var(--g555555); }
+        .dm-style-btn { width: 26px; height: 26px; border-radius: 50%; background: rgba(255,255,255,.15); color: var(--gffffff); border: none; font-size: 13px; cursor: pointer; flex-shrink: 0; padding: 0 !important; }
+        .dm-style-pop { position: absolute; bottom: 40px; left: 0; background: var(--g222222); border-radius: 8px; padding: 10px; z-index: 10; min-width: 200px; }
+        .dm-style-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; color: var(--gcccccc); }
+        .dm-style-row span { color: var(--g888888); flex-shrink: 0; }
+        .dm-style-row label { display: flex; align-items: center; gap: 3px; cursor: pointer; color: var(--gcccccc); }
         .dm-style-row i { display: inline-block; width: 16px; height: 16px; border-radius: 50%; }
         .dm-style-row input[type="radio"] { display: none; }
         .dm-style-row input[type="radio"]:checked + i { outline: 2px solid #FB7299; outline-offset: 1px; }
 
         .comment-list.show { display: block; }
         .comment-count {
-            color: #555555;
+            color: var(--g555555);
             font-weight: 400;
             margin-left: 6px;
         }
@@ -843,11 +844,11 @@
         .comment-scroll {
             max-height: 460px;
             overflow-y: auto;
-            border: 1px solid #222222;
+            border: 1px solid var(--g222222);
             border-radius: 6px;
-            background: #0a0a0a;
+            background: var(--g0a0a0a);
             padding: 4px 16px;
-            scrollbar-color: #333333 #0a0a0a;
+            scrollbar-color: var(--g333333) var(--g0a0a0a);
         }
         .comment-like-btn {
             display: flex;
@@ -856,12 +857,12 @@
             border: none;
             background: none;
             padding: 0;
-            color: #666666;
+            color: var(--g666666);
             font-size: 12px;
             cursor: pointer;
             transition: color .15s ease;
         }
-        .comment-like-btn:hover { color: #aaaaaa; background: none; }
+        .comment-like-btn:hover { color: var(--gaaaaaa); background: none; }
         .comment-like-btn.active { color: #FB7299; }
         /* 子回复点赞（SVG 风格，与主评论一致） */
         .sub-reply-like-btn {
@@ -871,7 +872,7 @@
             border: none;
             background: none;
             padding: 0;
-            color: #666666;
+            color: var(--g666666);
             font-size: 11px;
             margin-left: 6px;
             cursor: pointer;
@@ -879,13 +880,13 @@
             transition: color .15s ease;
         }
         .sub-reply-like-btn svg { flex-shrink: 0; display: block; }
-        .sub-reply-like-btn:hover { color: #aaaaaa; background: none; }
+        .sub-reply-like-btn:hover { color: var(--gaaaaaa); background: none; }
         .sub-reply-like-btn.active { color: #FB7299; }
         .comment-item {
             display: flex;
             gap: 12px;
             padding: 14px 0;
-            border-bottom: 1px solid #1a1a1a;
+            border-bottom: 1px solid var(--g1a1a1a);
         }
         .comment-item:last-child { border-bottom: none; }
         .comment-highlight { background: rgba(251,114,153,0.15); border-radius: 8px; }
@@ -895,7 +896,7 @@
             height: 36px;
             border-radius: 50%;
             object-fit: cover;
-            background: #1a1a1a;
+            background: var(--g1a1a1a);
             flex-shrink: 0;
         }
         .comment-main { flex: 1; min-width: 0; }
@@ -906,7 +907,7 @@
         }
         .comment-text {
             font-size: 14px;
-            color: #eeeeee;
+            color: var(--geeeeee);
             line-height: 1.6;
             word-break: break-word;
             white-space: pre-wrap;
@@ -917,18 +918,18 @@
             gap: 14px;
             margin-top: 6px;
             font-size: 12px;
-            color: #666666;
+            color: var(--g666666);
         }
         .comment-replies {
             margin-top: 10px;
             padding: 10px 12px;
-            background: #0d0d0d;
+            background: var(--g0d0d0d);
             border-radius: 6px;
         }
         .sub-reply {
             font-size: 13px;
             line-height: 1.6;
-            color: #bbbbbb;
+            color: var(--gbbbbbb);
             margin-bottom: 6px;
         }
         .sub-reply:last-of-type { margin-bottom: 0; }
@@ -937,7 +938,7 @@
             margin-right: 4px;
         }
         .sub-reply-like {
-            color: #666666;
+            color: var(--g666666);
             margin-left: 6px;
             font-size: 11px;
         }
@@ -947,14 +948,14 @@
             font-size: 12px;
             font-weight: 400;
             background: transparent;
-            border: 1px solid #333333;
-            color: #999999;
+            border: 1px solid var(--g333333);
+            color: var(--g999999);
             border-radius: 4px;
         }
         .reply-toggle:hover {
             background: transparent;
-            color: #ffffff;
-            border-color: #666666;
+            color: var(--gffffff);
+            border-color: var(--g666666);
         }
         /* 评论里的用户名 / 头像可点进主页 */
         .comment-user a, .sub-reply-user a {
@@ -966,7 +967,7 @@
         .comment-avatar-link { flex-shrink: 0; line-height: 0; }
         /* 评论正文：点击进入回复模式 */
         .comment-text { cursor: pointer; }
-        .comment-text:hover { color: #dddddd; }
+        .comment-text:hover { color: var(--gdddddd); }
         /* 评论里的表情图 */
         .comment-emoji {
             width: 1.5em;
@@ -986,9 +987,9 @@
             max-width: 220px;
             max-height: 200px;
             border-radius: 6px;
-            border: 1px solid #222222;
+            border: 1px solid var(--g222222);
             cursor: zoom-in;
-            background: #0d0d0d;
+            background: var(--g0d0d0d);
         }
         /* 删除自己评论的垃圾桶 */
         .comment-del-btn {
@@ -997,13 +998,13 @@
             border: none;
             background: none;
             padding: 2px;
-            color: #666666;
+            color: var(--g666666);
             cursor: pointer;
             transition: color .15s ease;
         }
         .comment-del-btn:hover { color: #FB7299; background: none; }
         .sub-reply .comment-del-btn { margin-left: 6px; }
-        .comment-reply-btn { background: none; border: none; padding: 0; font-size: 12px; color: #666; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+        .comment-reply-btn { background: none; border: none; padding: 0; font-size: 12px; color: var(--g666666); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
         .comment-reply-btn:hover { color: #FB7299; }
         /* 回复某人时的提示条 */
         .reply-bar {
@@ -1011,9 +1012,9 @@
             align-items: center;
             gap: 8px;
             font-size: 12px;
-            color: #999999;
-            background: #0d0d0d;
-            border: 1px solid #222222;
+            color: var(--g999999);
+            background: var(--g0d0d0d);
+            border: 1px solid var(--g222222);
             border-radius: 6px;
             padding: 5px 10px;
             margin-bottom: 8px;
@@ -1022,10 +1023,10 @@
         .reply-cancel {
             margin-left: auto;
             cursor: pointer;
-            color: #666666;
+            color: var(--g666666);
             font-size: 14px;
         }
-        .reply-cancel:hover { color: #fff; }
+        .reply-cancel:hover { color: var(--gffffff); }
         /* 表情按钮 + 悬浮表情面板 */
         .comment-composer .emote-btn {
             flex-shrink: 0;
@@ -1037,7 +1038,7 @@
             align-items: center;
             justify-content: center;
             background: transparent;
-            color: #aaaaaa;
+            color: var(--gaaaaaa);
             border: none;
             cursor: pointer;
         }
@@ -1051,8 +1052,8 @@
             width: 340px;
             max-height: 280px;
             overflow-y: auto;
-            background: #1a1a1a;
-            border: 1px solid #333333;
+            background: var(--g1a1a1a);
+            border: 1px solid var(--g333333);
             border-radius: 8px;
             padding: 10px;
             z-index: 50;
@@ -1060,7 +1061,7 @@
         }
         .emote-pkg-name {
             font-size: 11px;
-            color: #777777;
+            color: var(--g777777);
             margin: 6px 2px 4px;
         }
         .emote-grid {
@@ -1076,23 +1077,23 @@
             cursor: pointer;
             object-fit: contain;
         }
-        .emote-item:hover { background: #2a2a2a; }
-        .emote-loading { font-size: 12px; color: #777; padding: 10px; text-align: center; }
+        .emote-item:hover { background: var(--g2a2a2a); }
+        .emote-loading { font-size: 12px; color: var(--g777777); padding: 10px; text-align: center; }
         /* 评论区底部提示：登录提示 / 加载中 / 没有更多 / 失败重试 */
         .comment-footer {
             text-align: center;
             padding: 14px 0 10px;
             font-size: 13px;
-            color: #666666;
+            color: var(--g666666);
         }
         .comment-footer a { color: inherit; text-decoration: none; cursor: pointer; }
         .comment-footer.login,
         .comment-footer.login a { color: #FB7299; }
         .comment-footer.login a:hover { text-decoration: underline; }
-        .comment-footer.error a { color: #aaaaaa; }
-        .comment-footer.error a:hover { color: #ffffff; }
+        .comment-footer.error a { color: var(--gaaaaaa); }
+        .comment-footer.error a:hover { color: var(--gffffff); }
         .comment-empty, .comment-error {
-            color: #555555;
+            color: var(--g555555);
             font-size: 13px;
             padding: 6px 0;
         }
@@ -1100,7 +1101,7 @@
             height: 60px;
             border-radius: 6px;
             margin-bottom: 12px;
-            background: linear-gradient(90deg, #111111, #1c1c1c, #111111);
+            background: linear-gradient(90deg, var(--g111111), var(--g1c1c1c), var(--g111111));
             background-size: 200% 100%;
             animation: relatedShimmer 1.2s infinite;
         }
@@ -1126,7 +1127,75 @@
             .audio-title { font-size: 17px; }
             .audio-controls-row { gap: 18px; }
         }
-    </style>
+    
+  /* ============ 深浅色统一变量（自动生成，取代原来分散的灰阶字面量） ============ */
+:root {
+  --g000000: #000000;
+  --gffffff: #ffffff;
+  --g1a1a1a: #1a1a1a;
+  --gdddddd: #dddddd;
+  --g141414: #141414;
+  --g232323: #232323;
+  --g3a3a3a: #3a3a3a;
+  --g666666: #666666;
+  --g222222: #222222;
+  --g888888: #888888;
+  --g0a0a0a: #0a0a0a;
+  --g333333: #333333;
+  --g999999: #999999;
+  --g292929: #292929;
+  --g1f1f1f: #1f1f1f;
+  --g555555: #555555;
+  --gbbbbbb: #bbbbbb;
+  --g444444: #444444;
+  --gaaaaaa: #aaaaaa;
+  --g161616: #161616;
+  --gcccccc: #cccccc;
+  --g111111: #111111;
+  --g1c1c1c: #1c1c1c;
+  --geeeeee: #eeeeee;
+  --g0d0d0d: #0d0d0d;
+  --g777777: #777777;
+  --g2a2a2a: #2a2a2a;
+}
+:root[data-theme="light"] {
+  --g000000: #ffffff;
+  --gffffff: #000000;
+  --g1a1a1a: #e5e5e5;
+  --gdddddd: #222222;
+  --g141414: #ebebeb;
+  --g232323: #dcdcdc;
+  --g3a3a3a: #c5c5c5;
+  --g666666: #999999;
+  --g222222: #dddddd;
+  --g888888: #777777;
+  --g0a0a0a: #f5f5f5;
+  --g333333: #cccccc;
+  --g999999: #666666;
+  --g292929: #d6d6d6;
+  --g1f1f1f: #e0e0e0;
+  --g555555: #aaaaaa;
+  --gbbbbbb: #444444;
+  --g444444: #bbbbbb;
+  --gaaaaaa: #555555;
+  --g161616: #e9e9e9;
+  --gcccccc: #333333;
+  --g111111: #eeeeee;
+  --g1c1c1c: #e3e3e3;
+  --geeeeee: #111111;
+  --g0d0d0d: #f2f2f2;
+  --g777777: #888888;
+  --g2a2a2a: #d5d5d5;
+}
+/* 浅色模式：关注按钮白底粉字，解析/发送按钮 B站蓝 */
+:root[data-theme="light"] .follow-btn { background: #fff; color: #FB7299; border: 1px solid #FB7299; }
+:root[data-theme="light"] .follow-btn:hover { background: #FB7299; color: #fff; }
+:root[data-theme="light"] .follow-btn.followed { background: #f1f2f3; color: #61666D; border: none; }
+:root[data-theme="light"] .search-box button,
+:root[data-theme="light"] .comment-composer button { background: #00A1D6; color: #fff; border: 1px solid #00A1D6; }
+:root[data-theme="light"] .search-box button:hover,
+:root[data-theme="light"] .comment-composer button:hover { background: #0091c2; color: #fff; }
+</style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/artplayer/5.1.7/artplayer.js"></script>
     <script src="https://unpkg.com/artplayer-plugin-danmuku@5/dist/artplayer-plugin-danmuku.js"></script>
 </head>
@@ -1200,12 +1269,12 @@
                     </svg>
                 </button>
 
-                <button type="button" class="user-icon always-show" title="设置" data-placeholder="设置">
+                <a class="user-icon always-show" href="/settings" title="设置">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>
                         <path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.5-2-3.5-2.4.6a7.4 7.4 0 0 0-1.7-1L14.8 3h-4l-.5 2.6a7.4 7.4 0 0 0-1.7 1l-2.4-.6-2 3.5L6.2 11a7.6 7.6 0 0 0 0 2l-2 1.5 2 3.5 2.4-.6a7.4 7.4 0 0 0 1.7 1l.5 2.6h4l.5-2.6a7.4 7.4 0 0 0 1.7-1l2.4.6 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
                     </svg>
-                </button>
+                </a>
             </div>
         </div>
     </header>

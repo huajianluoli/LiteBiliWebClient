@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+<script>(function(){try{var isP=/\/(player|stream)/.test(location.pathname);var k=isP?'bili_player_theme':'bili_theme';var d=isP?'dark':'light';var t=localStorage.getItem(k)||d;if(t!=='dark'&&t!=='light')t=d;document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>B站视频搜索器</title>
@@ -50,7 +51,7 @@
     transition: background .25s ease, color .25s ease, box-shadow .25s ease;
   }
   .site-header.scrolled {
-    background: #fff;
+    background: var(--card);
     color: var(--text);
     box-shadow: 0 1px 8px rgba(0, 0, 0, .06);
   }
@@ -174,7 +175,7 @@
     top: calc(100% + 8px);
     left: 0;
     right: 0;
-    background: #fff;
+    background: var(--card);
     border: 1px solid var(--border);
     border-radius: 12px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, .12);
@@ -718,7 +719,7 @@
     height: 32px;
     padding: 0 8px;
     border: 1px solid var(--border);
-    background: #fff;
+    background: var(--card);
     color: var(--text-2);
     border-radius: 4px;
     font-size: 13px;
@@ -772,7 +773,7 @@
     align-items: center;
     gap: 5px;
     border: 1px solid var(--border);
-    background: #fff;
+    background: var(--card);
     color: var(--text-2);
     font-size: 13px;
     padding: 6px 14px;
@@ -830,6 +831,25 @@
     .content { padding: 16px 14px 40px; }
     .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
   }
+
+  /* ============ 深色模式 ============ */
+  :root[data-theme="dark"] {
+    --bg: #141414;
+    --card: #1f2022;
+    --text: #e6e6e8;
+    --text-2: #9a9da3;
+    --text-3: #6f7278;
+    --border: #2c2d30;
+  }
+  :root[data-theme="dark"] .site-header.scrolled { background: var(--card); box-shadow: 0 1px 8px rgba(0,0,0,.4); }
+  :root[data-theme="dark"] .top-nav-item:hover,
+  :root[data-theme="dark"] .site-header.scrolled .user-icon:hover { background: rgba(255,255,255,.08); }
+  :root[data-theme="dark"] .history-dropdown { background: var(--card); box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  :root[data-theme="dark"] .page-btn,
+  :root[data-theme="dark"] .refresh-btn { background: var(--card); }
+  :root[data-theme="dark"] .up-card { background: #2a1e22; border-color: #3a262c; }
+  :root[data-theme="dark"] .up-card:hover { background: #33232a; }
+  :root[data-theme="dark"] .avatar-btn { background: var(--card); }
 </style>
 </head>
 <body>
@@ -904,12 +924,12 @@
         </svg>
       </a>
 
-      <button type="button" class="user-icon" title="设置" data-placeholder="设置">
+      <a class="user-icon" href="/settings" title="设置">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>
           <path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.5-2-3.5-2.4.6a7.4 7.4 0 0 0-1.7-1L14.8 3h-4l-.5 2.6a7.4 7.4 0 0 0-1.7 1l-2.4-.6-2 3.5L6.2 11a7.6 7.6 0 0 0 0 2l-2 1.5 2 3.5 2.4-.6a7.4 7.4 0 0 0 1.7 1l.5 2.6h4l.5-2.6a7.4 7.4 0 0 0 1.7-1l2.4.6 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
         </svg>
-      </button>
+      </a>
     </div>
   </div>
 </header>
@@ -1478,6 +1498,16 @@ form.addEventListener('submit', (e) => {
 let bannerTimer = null;
 
 async function loadBanner() {
+  let mode = "auto";
+  try { mode = localStorage.getItem("bili_banner_mode") || "auto"; } catch (e) {}
+
+  if (mode === "custom") {
+    let url = "";
+    try { url = localStorage.getItem("bili_banner_custom_url") || ""; } catch (e) {}
+    if (url) { renderBannerImage(url); return; }
+    mode = "auto"; // 选了自定义但没填链接，退回默认规则
+  }
+
   let d;
   try {
     const r = await fetch("/api/banner");
@@ -1489,6 +1519,17 @@ async function loadBanner() {
   }
 
   const headerVideo = d.header?.layers?.find(l => l.type === "video");
+
+  if (mode === "header") {
+    if (headerVideo) { renderBannerVideo(headerVideo.src, d.header.pic || headerVideo.src); return; }
+    if (d.header?.pic) { renderBannerImage(d.header.pic); return; }
+    // 季节头图没有可用数据时，退回默认降级规则兜底
+  } else if (mode === "carousel") {
+    if (Array.isArray(d.carousel) && d.carousel.length) { renderBannerCarousel(d.carousel); return; }
+    // 轮播图没有可用数据时，退回默认降级规则兜底
+  }
+
+  // 默认降级规则：季节头图视频 > 轮播图 > 静态头图
   if (headerVideo) {
     renderBannerVideo(headerVideo.src, d.header.pic || headerVideo.src);
     return;
