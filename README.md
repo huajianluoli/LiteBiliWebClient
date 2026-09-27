@@ -1,4 +1,4 @@
-# LiteBili Web Client
+# Lite Bili Web Client
 
 > 基于 Node.js + Express 的自制 B 站网页客户端。
 
