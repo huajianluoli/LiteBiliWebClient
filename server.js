@@ -2580,6 +2580,7 @@ app.get("/account", (req, res) => res.sendFile(path.join(__dirname, "public", "a
 app.get("/live", (req, res) => res.sendFile(path.join(__dirname, "public", "live.html")));
 app.get("/stream", (req, res) => res.sendFile(path.join(__dirname, "public", "stream.html")));
 app.get("/message", (req, res) => res.sendFile(path.join(__dirname, "public", "message.html")));
+app.get("/settings", (req, res) => res.sendFile(path.join(__dirname, "public", "settings.html")));
 
 // ----------------------------- 直播弹幕转发（WebSocket） -----------------------------
 // 浏览器不方便直接连 B 站直播弹幕协议（二进制帧），所以由服务端先调 getDanmuInfo
