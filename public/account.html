@@ -407,6 +407,15 @@
   :root[data-theme="dark"] .user-icon:hover { background: rgba(255,255,255,.08); }
   :root[data-theme="dark"] .avatar-btn { background: var(--card); }
   :root[data-theme="dark"] .qr { background: #fff; }
+  :root[data-theme="dark"] .hero {
+    background: var(--card);
+    border-color: var(--border);
+  }
+  :root[data-theme="dark"] .hero-name { color: var(--text); }
+  :root[data-theme="dark"] .hero-sign { color: var(--text-2); }
+  :root[data-theme="dark"] .stat-num { color: var(--text); }
+  :root[data-theme="dark"] .stat-label { color: var(--text-3); }
+  :root[data-theme="dark"] .btn:not(.primary):not(.followed) { background: var(--card); color: var(--text); border-color: var(--border); }
 </style>
 </head>
 <body>
@@ -761,7 +770,7 @@ function renderProfile(u, isSelf) {
     </div>
     <div class="hero-actions">${isSelf
       ? '<button class="btn" id="logout">退出登录</button>'
-      : '<button class="btn primary" id="followBtn">关注+</button>'}</div>
+      : '<button class="btn primary" id="followBtn">关注+</button><button class="btn" id="msgBtn" style="margin-top:8px">发消息</button>'}</div>
   </section>
   <div class="tabs" id="tabs"></div>
   <section class="panel" id="panel"></section>`;
@@ -776,6 +785,8 @@ function renderProfile(u, isSelf) {
     const fb = document.getElementById('followBtn');
     setFollowBtn(fb, !!u.isFollowed);
     fb.onclick = () => toggleFollow(fb);
+    const mb = document.getElementById('msgBtn');
+    if (mb) mb.onclick = () => { location.href = `/message?talker_id=${ctx.mid}`; }
   }
 
   // 卡片点击：整个面板只绑一次（事件委托）

@@ -344,11 +344,11 @@ async function pollQR(id) {
 
 // ============ 消息中心主界面 ============
 const NAV_ITEMS = [
-  { key: 'im', label: '我的消息' },
+  { key: 'im', label: '关注人消息' },
+  { key: 'sys', label: '未关注人消息' },
   { key: 'reply', label: '回复我的' },
   { key: 'at', label: '@我的' },
   { key: 'like', label: '收到的赞' },
-  { key: 'sys', label: '未关注人消息' },
 ];
 let unread = { chat: 0, reply: 0, at: 0, like: 0, sysMsg: 0 };
 let activeTab = 'im';
@@ -546,6 +546,14 @@ let chatSeq = 0;
 async function openChat(talkerId, uname, face, sessionType) {
   currentTalker = talkerId;
   if (!emoteCache) loadEmotePanel();
+  if (!uname || !face) {
+    try {
+      const r = await fetch(`/api/user/${talkerId}`);
+      const d = await r.json();
+      if (d && d.uname) uname = d.uname;
+      if (d && d.face) face = d.face;
+    } catch(e) {}
+  }
   // 清除会话未读角标
   document.querySelectorAll(`.session-item[data-talker="${talkerId}"] .unread-badge`).forEach(b => b.remove());
   const mySeq = ++chatSeq;
@@ -738,7 +746,16 @@ async function load() {
   myFace = m.user?.face || '';
   renderShell();
   refreshUnread();
-  switchTab('im');
+  // 从 account 页"发消息"按钮跳转过来时，自动打开对应聊天
+  let autoTalker = '';
+  try { autoTalker = new URLSearchParams(location.search).get('talker_id') || ''; } catch(e) {}
+  if (autoTalker) {
+    switchTab('im');
+    // 等会话列表加载完再打开
+    setTimeout(() => openChat(Number(autoTalker), '', '', 1), 300);
+  } else {
+    switchTab('im');
+  }
 }
 load();
 </script>
