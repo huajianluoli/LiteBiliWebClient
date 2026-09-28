@@ -1939,22 +1939,79 @@
         }
 
         async function doFavorite() {
-            if (!currentAid) return;
-            const nextFav = !videoRelation.favorite;
+            if (!currentAid) { alert('视频还没加载好'); return; }
+            openFavModal();
+        }
+
+        // ---- 收藏夹选择弹窗 ----
+        async function openFavModal() {
+            const old = document.getElementById('favModal');
+            if (old) old.remove();
+            const mask = document.createElement('div');
+            mask.id = 'favModal';
+            mask.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;';
+            mask.innerHTML = `
+              <div style="background:var(--g0a0a0a,#fff);color:var(--gffffff,#000);width:90%;max-width:420px;max-height:80vh;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.4);">
+                <div style="padding:16px 20px;font-weight:600;font-size:16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--g222222,#e3e5e7);">
+                  <span>选择收藏夹</span>
+                  <button id="favModalClose" style="border:none;background:none;font-size:22px;cursor:pointer;color:inherit;padding:0 8px;line-height:1;">&times;</button>
+                </div>
+                <div id="favModalList" style="overflow-y:auto;padding:8px 0;flex:1;">
+                  <div style="padding:30px;text-align:center;opacity:.6;">正在加载…</div>
+                </div>
+                <div style="padding:12px 20px;border-top:1px solid var(--g222222,#e3e5e7);">
+                  <button id="favModalOk" style="width:100%;padding:11px;border:none;background:#FB7299;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">确定</button>
+                </div>
+              </div>`;
+            document.body.appendChild(mask);
+            mask.addEventListener('click', (e) => { if (e.target === mask) mask.remove(); });
+            document.getElementById('favModalClose').onclick = () => mask.remove();
+
+            let initialState = {};
             try {
-                const res = await fetch('/api/video/favorite', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ aid: currentAid, action: nextFav ? 'add' : 'remove' }),
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || '收藏失败');
-                videoRelation.favorite = nextFav;
-                videoStat.favorite = (videoStat.favorite || 0) + (nextFav ? 1 : -1);
-                renderPlayerActions();
-            } catch (err) {
-                alert(err.message || '收藏失败,请先登录 B 站账号');
+                const r = await fetch('/api/video/fav/folders?aid=' + currentAid);
+                const d = await r.json();
+                if (!r.ok) throw new Error(d.error || '加载失败');
+                const listEl = document.getElementById('favModalList');
+                if (!d.list?.length) { listEl.innerHTML = '<div style="padding:30px;text-align:center;opacity:.6;">还没有收藏夹</div>'; return; }
+                d.list.forEach(f => { initialState[f.id] = !!f.checked; });
+                listEl.innerHTML = d.list.map(f => `
+                  <label style="display:flex;align-items:center;gap:12px;padding:12px 20px;cursor:pointer;">
+                    <input type="checkbox" ${f.checked ? 'checked' : ''} data-fid="${f.id}" style="width:18px;height:18px;accent-color:#FB7299;flex-shrink:0;">
+                    <div style="flex:1;min-width:0;">
+                      <div style="font-size:14px;font-weight:500;">${esc(f.title)}</div>
+                      <div style="font-size:12px;opacity:.6;">${f.count} 个内容</div>
+                    </div>
+                  </label>`).join('');
+            } catch (e) {
+                document.getElementById('favModalList').innerHTML = `<div style="padding:30px;text-align:center;">${esc(e.message || '加载失败')}</div>`;
             }
+
+            document.getElementById('favModalOk').onclick = async () => {
+                const okBtn = document.getElementById('favModalOk');
+                okBtn.disabled = true; okBtn.textContent = '保存中…';
+                try {
+                    const boxes = document.querySelectorAll('#favModalList input[type=checkbox]');
+                    for (const cb of boxes) {
+                        const fid = Number(cb.dataset.fid);
+                        const nowChecked = cb.checked;
+                        if (nowChecked === initialState[fid]) continue;
+                        const r = await fetch('/api/video/fav/toggle', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ aid: currentAid, folder_id: fid, checked: nowChecked }),
+                        });
+                        const d = await r.json();
+                        if (!r.ok) throw new Error(d.error || '操作失败');
+                    }
+                    videoRelation.favorite = !!document.querySelector('#favModalList input:checked');
+                    renderPlayerActions();
+                    mask.remove();
+                } catch (e) {
+                    alert(e.message || '操作失败');
+                    okBtn.disabled = false; okBtn.textContent = '确定';
+                }
+            };
         }
 
         /* ----------------------------- 评论区 ----------------------------- */

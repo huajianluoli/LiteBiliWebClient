@@ -322,7 +322,7 @@
     <div id="followedBox"><div class="loading">正在加载…</div></div>
   </div>
   <div class="col-recommend">
-    <div class="col-title">直播推荐</div>
+    <div class="col-title" id="recommendTitle">直播推荐</div>
     <div id="recommendBox"><div class="loading">正在加载…</div></div>
   </div>
 </div>
@@ -369,11 +369,24 @@ document.querySelectorAll('[data-placeholder]').forEach(el => {
   el.addEventListener('click', () => showToast((el.dataset.placeholder || '该功能') + '功能开发中，敬请期待'));
 });
 
-document.getElementById('searchForm').addEventListener('submit', (e) => {
+document.getElementById('searchForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const kw = document.getElementById('keyword').value.trim();
   if (!kw) return;
-  location.href = '/search?kw=' + encodeURIComponent(kw);
+  // 在直播页：搜直播；其他页跳视频搜索
+  const title = document.getElementById('recommendTitle');
+  const box = document.getElementById('recommendBox');
+  title.textContent = `搜索：${kw}`;
+  box.innerHTML = '<div class="loading">正在搜索直播…</div>';
+  try {
+    const r = await fetch('/api/live/search?keyword=' + encodeURIComponent(kw));
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '搜索失败');
+    if (!d.list?.length) { box.innerHTML = '<div class="empty-panel">没有找到相关直播</div>'; return; }
+    box.innerHTML = `<div class="live-grid">${d.list.map(liveCardHTML).join('')}</div>`;
+  } catch (err) {
+    box.innerHTML = `<div class="empty-panel">${esc(err.message || '搜索失败')}</div>`;
+  }
 });
 
 // ============ 登录态 ============
