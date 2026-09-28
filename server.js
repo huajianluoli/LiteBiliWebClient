@@ -1259,6 +1259,64 @@ app.post("/api/video/favorite", async (req, res) => {
   }
 });
 
+// 列出当前用户的收藏夹（含当前视频是否已被收藏到各夹）
+app.get("/api/video/fav/folders", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  const aid = parseInt(req.query.aid, 10) || 0;
+  try {
+    const upMid = String(session.user?.mid || session.cookies.DedeUserID || "");
+    const listUrl = new URL("https://api.bilibili.com/x/v3/fav/folder/created/list-all");
+    listUrl.searchParams.set("up_mid", upMid);
+    listUrl.searchParams.set("type", "2");
+    if (aid) listUrl.searchParams.set("rid", String(aid));
+    listUrl.searchParams.set("creator", upMid);
+    const j = await (await biliFetch(listUrl.toString(), {}, session)).json();
+    if (j.code !== 0) return res.status(502).json({ error: j.message || "获取收藏夹失败" });
+    const list = (j.data?.list || []).map(f => ({
+      id: f.id,
+      title: f.title,
+      count: f.media_count || 0,
+      cover: f.cover || "",
+      checked: !!(f.fav_state || f.faved || f.status === 1 || f.has_media),
+    }));
+    res.json({ list });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "获取收藏夹失败" });
+  }
+});
+
+// 切换某个收藏夹的收藏状态
+app.post("/api/video/fav/toggle", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  const aid = parseInt(req.body.aid, 10) || 0;
+  const folderId = parseInt(req.body.folder_id, 10) || 0;
+  const checked = !!req.body.checked;
+  if (!aid || !folderId) return res.status(400).json({ error: "缺少参数" });
+  try {
+    const signedParams = await signWbi({
+      rid: String(aid),
+      type: "2",
+      add_media_ids: checked ? String(folderId) : "",
+      del_media_ids: checked ? "" : String(folderId),
+      csrf: session.cookies.bili_jct || "",
+      platform: "web",
+    }, session);
+    const j = await (await biliFetch("https://api.bilibili.com/x/v3/fav/resource/deal", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(signedParams).toString(),
+    }, session)).json();
+    if (j.code !== 0) return res.status(502).json({ error: j.message || "操作失败" });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "操作失败" });
+  }
+});
+
 // ----------------------------- 评论区 -----------------------------
 // 参考 WristBilibili 的 getReply/getReply(sub)，接口不强制要求 WBI 签名。
 app.get("/api/comments", async (req, res) => {
@@ -2120,6 +2178,45 @@ app.get("/api/live/recommend", async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "获取推荐直播失败" });
+  }
+});
+
+// 直播间搜索
+app.get("/api/live/search", async (req, res) => {
+  const session = getSession(req);
+  const keyword = String(req.query.keyword || "").trim();
+  if (!keyword) return res.status(400).json({ error: "缺少关键词" });
+  try {
+    const signed = await signWbi({
+      search_type: "live_room",
+      keyword,
+      page: 1,
+      page_size: 30,
+    }, session);
+    const raw = await (await biliFetch("https://api.bilibili.com/x/web-interface/search/type?" + new URLSearchParams(signed).toString(), {
+      headers: { Referer: "https://search.bilibili.com/" },
+    }, session)).text();
+    let j;
+    try { j = JSON.parse(raw); }
+    catch (e) {
+      return res.status(502).json({ error: "搜索接口被风控，请稍后再试" });
+    }
+    if (j.code !== 0) return res.status(502).json({ error: `搜索失败: ${j.message || j.code}` });
+    const rooms = j.data?.result || [];
+    const list = rooms.map(r => ({
+      roomId: r.roomid || r.short_id || null,
+      uid: r.uid || null,
+      uname: sanitizeTitle(r.uname || ""),
+      face: normalizeImgUrl(r.uface || ""),
+      title: sanitizeTitle(r.title || "").replace(/<[^>]+>/g, ""),
+      cover: normalizeImgUrl(r.user_cover || r.cover || r.pic || ""),
+      online: r.online ?? null,
+      area: r.area || r.cate_name || "",
+    })).filter(r => r.roomId);
+    res.json({ list });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "搜索直播失败" });
   }
 });
 
