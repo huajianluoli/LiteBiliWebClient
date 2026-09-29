@@ -24,15 +24,30 @@ let cachedCookie = "";
 let cookieFetchedAt = 0;
 const COOKIE_TTL_MS = 30 * 60 * 1000;
 
+// 持久化：data/ 文件夹保存 buvid3 和每个设备的登录 cookie，
+// 服务器重启后不用重新登录、不用冷启动等 buvid3。
+const DATA_DIR = path.join(__dirname, "data");
+const COOKIE_FILE = path.join(DATA_DIR, "cookies.json");
+let persistedCookies = { buvid3: "", devices: {} };
+try {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (fs.existsSync(COOKIE_FILE)) {
+    persistedCookies = JSON.parse(fs.readFileSync(COOKIE_FILE, "utf8"));
+    if (persistedCookies.buvid3) { cachedCookie = persistedCookies.buvid3; cookieFetchedAt = Date.now(); }
+  }
+} catch (e) { console.error("data/ 读取失败:", e.message); }
+function savePersistedCookies() {
+  try {
+    persistedCookies.buvid3 = cachedCookie;
+    fs.writeFileSync(COOKIE_FILE, JSON.stringify(persistedCookies, null, 2));
+  } catch (e) { console.error("data/ 写入失败:", e.message); }
+}
+
 // 登录态说明：
-// 凭证（SESSDATA / bili_jct / DedeUserID 等）完全由前端保存在 localStorage，
-// 不落在服务端、不写 data/ 文件。前端每次请求通过 X-Bili-Cookie 请求头把整串
-// B 站 cookies 带上来；服务端临时拼成 session 对象去请求 B 站，用完即弃。
-// 这样在不同电脑上开同一个服务器、用同一个浏览器客户端，登录态都不会丢。
-//
-// 匿名侧的设备指纹 cookie（buvid3 等）仍由服务端 ensureCookie() 缓存合并。
-const sessions = new Map(); // 兼容旧逻辑引用已废弃，保留为空 Map 不再持久化
-const qrSessions = new Map();   // 二维码是临时的，不需要持久化
+// 凭证（SESSDATA / bili_jct / DedeUserID 等）由前端保存在 localStorage，
+// 同时后端按设备 ID 持久化到 data/cookies.json，服务器重启后自动恢复。
+const sessions = new Map();
+const qrSessions = new Map();
 
 function randomId(bytes = 24) {
   return crypto.randomBytes(bytes).toString("hex");
@@ -95,13 +110,23 @@ async function followLoginTicket(url) {
   return cookies;
 }
 
-// 会话识别：登录凭证完全由前端通过 X-Bili-Cookie 请求头携带（整串 B 站 cookies），
-// 服务端不落盘。这里临时解析成 session 对象，供后续 biliFetch 合并使用。
+// 会话识别：登录凭证由前端通过 X-Bili-Cookie 请求头携带，
+// 同时按 X-Device-Id 持久化到 data/cookies.json，服务器重启后自动恢复。
 function getSession(req) {
-  const raw = String(req.headers["x-bili-cookie"] || "");
+  const deviceId = String(req.headers["x-device-id"] || "").trim();
+  let raw = String(req.headers["x-bili-cookie"] || "").trim();
+  // 前端没带 cookie 但后端有该设备的持久化记录，直接用
+  if (!raw && deviceId && persistedCookies.devices[deviceId]) {
+    raw = persistedCookies.devices[deviceId];
+  }
   if (!raw) return null;
   const cookies = parseCookieString(raw);
   if (!cookies.SESSDATA) return null;
+  // 有新 cookie 就更新持久化
+  if (deviceId && req.headers["x-bili-cookie"]) {
+    persistedCookies.devices[deviceId] = raw;
+    savePersistedCookies();
+  }
   return { cookies, user: null, createdAt: 0, lastSeen: 0 };
 }
 
@@ -202,6 +227,7 @@ async function ensureCookie() {
 
     cachedCookie = cookieHeader(cookies);
     cookieFetchedAt = Date.now();
+    savePersistedCookies();
     return cachedCookie;
   })().finally(() => { ensureCookiePromise = null; });
 
@@ -1981,6 +2007,38 @@ app.get("/api/user/:mid", async (req, res) => {
     res.json({ ...profile, follower: rel.follower, following: rel.following });
   } catch (e) {
     res.status(502).json({ code: e.code, error: e.message || "获取用户信息失败" });
+  }
+});
+
+// 关注/粉丝列表
+app.get("/api/relation/list", async (req, res) => {
+  const session = getSession(req);
+  const mid = parseInt(req.query.mid || "", 10);
+  const type = String(req.query.type || "following"); // following | follower
+  const pn = Math.max(1, parseInt(req.query.pn, 10) || 1);
+  if (!mid) return res.status(400).json({ error: "缺少 mid" });
+  try {
+    const api = type === "follower" ? "x/relation/followers" : "x/relation/followings";
+    const u = new URL(`https://api.bilibili.com/${api}`);
+    u.searchParams.set("vmid", String(mid));
+    u.searchParams.set("pn", String(pn));
+    u.searchParams.set("ps", "20");
+    u.searchParams.set("order", "desc");
+    u.searchParams.set("platform", "web");
+    const r = await biliFetch(u.toString(), {}, session);
+    const j = await r.json();
+    if (j.code !== 0) return res.status(502).json({ error: j.message || "获取失败" });
+    const list = (j.data?.list || []).map(u => ({
+      mid: u.mid || null,
+      uname: u.uname || "",
+      face: u.face || "",
+      sign: u.sign || "",
+      live: u.live_room_status === 1 || (u.live_room && u.live_room.liveStatus === 1),
+    }));
+    res.json({ list, total: j.data?.total ?? list.length, hasMore: list.length >= 20, pn, ps: 20 });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "获取列表失败" });
   }
 });
 
