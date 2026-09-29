@@ -988,6 +988,16 @@ try {
   if (raw) _credsMem = JSON.parse(raw) || {};
 } catch (e) {}
 
+// 设备 ID：后端按此持久化 cookie，服务器重启后不用重新登录
+let _deviceId = '';
+try {
+  _deviceId = localStorage.getItem('bili_device_id') || '';
+  if (!_deviceId) {
+    _deviceId = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem('bili_device_id', _deviceId);
+  }
+} catch (e) {}
+
 function _getCreds() { return _credsMem || {}; }
 function _setCreds(obj) {
   _credsMem = obj || {};
@@ -1006,12 +1016,12 @@ const _origFetch = window.fetch.bind(window);
 window.fetch = (input, opts) => {
   opts = opts || {};
   const ch = _cookieHeader();
-  if (opts.headers instanceof Headers) {
-    if (ch) opts.headers.set('X-Bili-Cookie', ch);
-  } else {
-    opts.headers = Object.assign({}, opts.headers);
-    if (ch) opts.headers['X-Bili-Cookie'] = ch;
-  }
+  const setHeader = (k, v) => {
+    if (opts.headers instanceof Headers) opts.headers.set(k, v);
+    else opts.headers = Object.assign({}, opts.headers), opts.headers[k] = v;
+  };
+  if (_deviceId) setHeader('X-Device-Id', _deviceId);
+  if (ch) setHeader('X-Bili-Cookie', ch);
   return _origFetch(input, opts);
 };
 
@@ -1049,30 +1059,44 @@ function enterSearchMode() {
 }
 
 // ============ 登录态检测 ============
-(async function checkLogin() {
+// 先用 localStorage 缓存的用户信息即时渲染头像，再后台刷新
+let _loginReady = null; // Promise，resolve 后推荐视频才加载
+(function checkLogin() {
   const loginEntry = document.getElementById('loginEntry');
-  try {
-    const r = await fetch('/api/me');
-    const d = await r.json();
-    if (d.loggedIn && d.user) {
-      const face = d.user.face || '';
-      const uname = d.user.uname || '';
-      const a = document.createElement('a');
-      a.className = 'avatar-btn';
-      a.href = '/account';
-      a.title = uname;
-      if (face) {
-        const img = document.createElement('img');
-        img.src = face.startsWith('//') ? 'https:' + face : face;
-        img.referrerPolicy = 'no-referrer';
-        img.alt = uname;
-        a.appendChild(img);
-      } else {
-        a.textContent = uname.slice(0, 1) || '我';
-      }
-      loginEntry.replaceWith(a);
+  const cached = (() => { try { return JSON.parse(localStorage.getItem('bili_user') || 'null'); } catch (e) { return null; } })();
+  function renderAvatar(d) {
+    if (!d || !d.user) return;
+    const face = d.user.face || '';
+    const uname = d.user.uname || '';
+    const a = document.createElement('a');
+    a.className = 'avatar-btn';
+    a.href = '/account';
+    a.title = uname;
+    if (face) {
+      const img = document.createElement('img');
+      img.src = face.startsWith('//') ? 'https:' + face : face;
+      img.referrerPolicy = 'no-referrer';
+      img.alt = uname;
+      a.appendChild(img);
+    } else {
+      a.textContent = uname.slice(0, 1) || '我';
     }
-  } catch (e) {}
+    loginEntry.replaceWith(a);
+  }
+  if (cached && cached.loggedIn) renderAvatar(cached);
+  _loginReady = (async () => {
+    try {
+      const r = await fetch('/api/me');
+      const d = await r.json();
+      if (d.loggedIn && d.user) {
+        try { localStorage.setItem('bili_user', JSON.stringify(d)); } catch (e) {}
+        renderAvatar(d);
+      } else {
+        try { localStorage.removeItem('bili_user'); } catch (e) {}
+      }
+      return d.loggedIn;
+    } catch (e) { return !!cached; }
+  })();
 })();
 
 // ============ 占位按钮 toast ============
@@ -1654,7 +1678,8 @@ function renderBannerCarousel(items) {
     doSearch(kw, 1);
   } else {
     loadBanner();
-    loadRecommend();
+    // 等登录态确认后再加载推荐，避免未登录状态先拉了热门视频
+    Promise.resolve(_loginReady).then(() => loadRecommend());
   }
 })();
 </script>

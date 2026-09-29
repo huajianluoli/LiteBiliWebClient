@@ -271,8 +271,26 @@
   }
   .hero-stats { display: flex; gap: 22px; margin-top: 12px; flex-wrap: wrap; }
   .stat-block { display: flex; flex-direction: column; gap: 2px; }
+  .stat-clickable { cursor: pointer; border-radius: 8px; padding: 4px 8px; margin: -4px -8px; transition: background .15s; }
+  .stat-clickable:active { background: var(--card-hover, rgba(128,128,128,.15)); }
   .stat-num { font-size: 16px; font-weight: 700; color: var(--text); }
   .stat-label { font-size: 12px; color: var(--text-3); }
+  .pagination { display:flex; align-items:center; justify-content:center; gap:6px; margin-top:24px; flex-wrap:wrap; }
+  .page-btn { min-width:34px; height:34px; padding:0 8px; border:1px solid var(--card-border,rgba(128,128,128,.3)); background:var(--card); color:var(--text-2); border-radius:6px; font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-family:inherit; }
+  .page-btn.active { border-color:#FB7299; color:#FB7299; font-weight:600; }
+  .page-btn:disabled { opacity:.4; cursor:default; }
+  .page-ellipsis { color:var(--text-3); padding:0 4px; }
+  .rel-modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index:9999; display:flex; align-items:center; justify-content:center; }
+  .rel-modal { background: var(--bg); color: var(--text); width: 90%; max-width:420px; max-height:80vh; border-radius:12px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 10px 40px rgba(0,0,0,.4); }
+  .rel-modal-header { padding:16px 20px; font-weight:600; font-size:16px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--card-border, rgba(128,128,128,.2)); }
+  .rel-modal-close { border:none; background:none; font-size:22px; cursor:pointer; color:inherit; line-height:1; padding:0 4px; }
+  .rel-modal-list { overflow-y:auto; flex:1; }
+  .rel-item { display:flex; align-items:center; gap:12px; padding:12px 20px; cursor:pointer; }
+  .rel-item:active { background: var(--card-hover, rgba(128,128,128,.1)); }
+  .rel-item img { width:40px; height:40px; border-radius:50%; object-fit:cover; flex-shrink:0; }
+  .rel-item .info { flex:1; min-width:0; }
+  .rel-item .name { font-size:14px; font-weight:500; }
+  .rel-item .sign { font-size:12px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px; }
   .hero-actions { margin-left: auto; align-self: flex-start; }
   .btn {
     border: 1px solid var(--border);
@@ -513,16 +531,19 @@ function _cookieHeader() {
   return Object.keys(c).map(k => `${k}=${c[k]}`).join('; ');
 }
 
+let _deviceId = '';
+try {
+  _deviceId = localStorage.getItem('bili_device_id') || '';
+  if (!_deviceId) { _deviceId = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('bili_device_id', _deviceId); }
+} catch (e) {}
+
 const _origFetch = window.fetch.bind(window);
 window.fetch = (input, opts) => {
   opts = opts || {};
   const ch = _cookieHeader();
-  if (opts.headers instanceof Headers) {
-    if (ch) opts.headers.set('X-Bili-Cookie', ch);
-  } else {
-    opts.headers = Object.assign({}, opts.headers);
-    if (ch) opts.headers['X-Bili-Cookie'] = ch;
-  }
+  const setH = (k, v) => { if (opts.headers instanceof Headers) opts.headers.set(k, v); else opts.headers = Object.assign({}, opts.headers), opts.headers[k] = v; };
+  if (_deviceId) setH('X-Device-Id', _deviceId);
+  if (ch) setH('X-Bili-Cookie', ch);
   return _origFetch(input, opts);
 };
 
@@ -682,8 +703,10 @@ let panelToken = 0;   // 切换标签页后，丢弃上一个标签页还没返�
 
 const panelEl = () => document.getElementById('panel');
 
-function statHTML(id, num, label) {
-  return `<div class="stat-block"><span class="stat-num" id="${id}">${num}</span><span class="stat-label">${label}</span></div>`;
+function statHTML(id, num, label, clickable) {
+  return `<div class="stat-block${clickable ? ' stat-clickable' : ''}" id="${id}">
+    <span class="stat-num">${num}</span><span class="stat-label">${label}</span>
+  </div>`;
 }
 
 function setFollowBtn(btn, followed) {
@@ -739,7 +762,7 @@ function setTabCount(key, count) {
 
 function activateTab(key) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === key));
-  ({ videos: loadVideos, history: loadHistory, fav: loadFavs })[key]();
+  ({ videos: loadVideos, history: loadHistory, fav: loadFavs, following: loadRelList, follower: loadRelList })[key]();
 }
 
 function renderProfile(u, isSelf) {
@@ -824,6 +847,10 @@ function renderProfile(u, isSelf) {
     probeExtraTabs(ctx.mid);
   }
   activateTab(start);
+
+  // 关注的人 / 粉丝 tab
+  addTab('following', '关注的人');
+  addTab('follower', '粉丝');
 }
 
 // 别人的主页：先尝试访问历史记录 / 收藏夹，拿不到数据就不显示对应按钮
@@ -970,6 +997,61 @@ async function loadFavContent(id, stillCurrent) {
     box.innerHTML = d.list?.length ? `<div class="grid">${d.list.map(v => card(v)).join('')}</div>` : '<div class="empty">这个收藏夹暂时没有视频</div>';
   } catch (e) {
     if (stillCurrent()) box.innerHTML = `<div class="empty">${esc(e.message || '加载失败')}</div>`;
+  }
+}
+
+// ============ 关注的人 / 粉丝 ============
+let _relPage = 1;
+let _relTotalPages = 1;
+let _relType = 'following';
+function _relPageNums(cur, total) {
+  const w = 2;
+  const pages = [1];
+  for (let p = Math.max(2, cur - w); p <= Math.min(total - 1, cur + w); p++) pages.push(p);
+  if (cur - w > 2) pages.splice(1, 0, '...');
+  if (total > 1 && !pages.includes(total)) pages.push('...', total);
+  return pages;
+}
+async function loadRelList() {
+  const p = panelEl();
+  const key = document.querySelector('.tab.active')?.dataset.tab || 'following';
+  _relType = key === 'follower' ? 'follower' : 'following';
+  if (p.dataset.relType !== _relType) { _relPage = 1; p.dataset.relType = _relType; }
+  const token = ++panelToken;
+  p.innerHTML = '<div class="loading">正在加载…</div>';
+  try {
+    const r = await fetch(`/api/relation/list?mid=${ctx.mid}&type=${_relType}&pn=${_relPage}`);
+    const d = await r.json();
+    if (token !== panelToken) return;
+    if (!r.ok) { showPanelError(p, d.error || '加载失败', loadRelList); return; }
+    _relTotalPages = Math.max(1, Math.ceil((d.total || d.list.length) / 20));
+    if (!d.list?.length) { p.innerHTML = '<div class="empty">暂无数据</div>'; return; }
+    const grid = `<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;">` + d.list.map(u => `
+      <div class="rel-item" data-mid="${u.mid}" style="display:flex;align-items:center;gap:8px;padding:8px;border-radius:10px;background:var(--card);cursor:pointer;overflow:hidden;">
+        <img src="${esc(faceUrl(u.face))}" referrerpolicy="no-referrer" style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0;" onerror="this.style.visibility='hidden'">
+        <div style="flex:1;min-width:0;overflow:hidden;">
+          <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(u.uname)}</div>
+          ${u.sign ? `<div style="font-size:11px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;max-width:100%;">${esc(u.sign)}</div>` : ''}
+        </div>
+      </div>`).join('') + `</div>`;
+    const nums = _relPageNums(_relPage, _relTotalPages);
+    const btns = nums.map(n => n === '...' ? '<span class="page-ellipsis">…</span>' :
+      `<button class="page-btn${n === _relPage ? ' active' : ''}" data-page="${n}" ${n === _relPage ? 'disabled' : ''}>${n}</button>`).join('');
+    const pag = _relTotalPages > 1 ? `<div class="pagination">
+      <button class="page-btn" data-page="${_relPage - 1}" ${_relPage <= 1 ? 'disabled' : ''}>‹</button>
+      ${btns}
+      <button class="page-btn" data-page="${_relPage + 1}" ${_relPage >= _relTotalPages ? 'disabled' : ''}>›</button>
+    </div>` : '';
+    p.innerHTML = grid + pag;
+    p.querySelectorAll('.rel-item').forEach(el => {
+      el.onclick = () => { const m = el.dataset.mid; if (m) location.href = '/account?mid=' + m; };
+    });
+    p.querySelectorAll('.page-btn').forEach(b => {
+      if (b.disabled) return;
+      b.onclick = () => { _relPage = parseInt(b.dataset.page, 10); loadRelList(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+    });
+  } catch (e) {
+    if (token === panelToken) showPanelError(p, e.message || '加载失败', loadRelList);
   }
 }
 

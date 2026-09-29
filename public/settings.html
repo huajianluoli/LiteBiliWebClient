@@ -242,15 +242,16 @@
     const raw = localStorage.getItem('bili_creds');
     const creds = raw ? JSON.parse(raw) : {};
     const ch = Object.keys(creds).map(k => `${k}=${creds[k]}`).join('; ');
-    if (ch) {
-      const of = window.fetch;
-      window.fetch = function(input, opts) {
-        opts = opts || {};
-        opts.headers = Object.assign({}, opts.headers);
-        opts.headers['X-Bili-Cookie'] = ch;
-        return of(input, opts);
-      };
-    }
+    let devId = localStorage.getItem('bili_device_id') || '';
+    if (!devId) { devId = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('bili_device_id', devId); }
+    const of = window.fetch;
+    window.fetch = function(input, opts) {
+      opts = opts || {};
+      opts.headers = Object.assign({}, opts.headers);
+      if (devId) opts.headers['X-Device-Id'] = devId;
+      if (ch) opts.headers['X-Bili-Cookie'] = ch;
+      return of(input, opts);
+    };
   } catch(e) {}
 })();
 

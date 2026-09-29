@@ -230,12 +230,15 @@ function _setCreds(obj) {
   try { if (obj && Object.keys(obj).length) localStorage.setItem('bili_creds', JSON.stringify(obj)); else localStorage.removeItem('bili_creds'); } catch (e) {}
 }
 function _cookieHeader() { return Object.keys(_credsMem || {}).map(k => `${k}=${_credsMem[k]}`).join('; '); }
+let _deviceId = '';
+try { _deviceId = localStorage.getItem('bili_device_id') || ''; if (!_deviceId) { _deviceId = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('bili_device_id', _deviceId); } } catch (e) {}
 const _origFetch = window.fetch.bind(window);
 window.fetch = (input, opts) => {
   opts = opts || {};
   const ch = _cookieHeader();
-  if (opts.headers instanceof Headers) { if (ch) opts.headers.set('X-Bili-Cookie', ch); }
-  else { opts.headers = Object.assign({}, opts.headers); if (ch) opts.headers['X-Bili-Cookie'] = ch; }
+  const setH = (k, v) => { if (opts.headers instanceof Headers) opts.headers.set(k, v); else opts.headers = Object.assign({}, opts.headers), opts.headers[k] = v; };
+  if (_deviceId) setH('X-Device-Id', _deviceId);
+  if (ch) setH('X-Bili-Cookie', ch);
   return _origFetch(input, opts);
 };
 
