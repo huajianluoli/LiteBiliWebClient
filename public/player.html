@@ -1215,8 +1215,42 @@
 :root[data-theme="light"] .search-box button:hover,
 :root[data-theme="light"] .comment-composer button:hover { background: #0091c2; color: #fff; }
 </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/artplayer/5.1.7/artplayer.js"></script>
-    <script src="https://unpkg.com/artplayer-plugin-danmuku@5/dist/artplayer-plugin-danmuku.js"></script>
+    <script>
+        // Artplayer 多源加载：优先国内可访问的镜像，最终兜底到本地 /vendor/
+        window.__artReady = (function () {
+            const SOURCES = {
+                art: [
+                    'https://cdn.jsdelivr.net/npm/artplayer@5.1.7/dist/artplayer.js',
+                    'https://cdn.staticfile.org/artplayer/5.1.7/artplayer.js',
+                    'https://cdn.bootcdn.net/ajax/libs/artplayer/5.1.7/artplayer.js',
+                    '/vendor/artplayer.js'
+                ],
+                dm: [
+                    'https://cdn.jsdelivr.net/npm/artplayer-plugin-danmuku@5/dist/artplayer-plugin-danmuku.js',
+                    'https://unpkg.com/artplayer-plugin-danmuku@5/dist/artplayer-plugin-danmuku.js',
+                    '/vendor/artplayer-plugin-danmuku.js'
+                ]
+            };
+            function loadScript(url) {
+                return new Promise(function (resolve, reject) {
+                    var s = document.createElement('script');
+                    s.src = url;
+                    s.onload = function () { resolve(url); };
+                    s.onerror = function () { s.remove(); reject(new Error('加载失败 ' + url)); };
+                    document.head.appendChild(s);
+                });
+            }
+            async function loadSeq(list) {
+                var lastErr;
+                for (var i = 0; i < list.length; i++) {
+                    try { return await loadScript(list[i]); }
+                    catch (e) { lastErr = e; }
+                }
+                throw lastErr || new Error('全部镜像加载失败');
+            }
+            return Promise.all([loadSeq(SOURCES.art), loadSeq(SOURCES.dm)]);
+        })();
+    </script>
 </head>
 <body>
 
@@ -2740,12 +2774,21 @@
             }
         }
 
-        function initPlayer(playInfo, danmakuList) {
+        async function initPlayer(playInfo, danmakuList) {
             if (art) {
                 art.destroy(false);
                 art = null;
             }
             destroyDashAudio();
+
+            // 确保 Artplayer 脚本已就绪（多源加载，本地 vendor 兜底）
+            try {
+                await window.__artReady;
+            } catch (e) {
+                console.error('Artplayer 脚本加载失败:', e);
+                alert('播放器脚本加载失败，请检查网络或刷新重试');
+                return;
+            }
 
             // 记住本次播放信息，供 fallbackToDurl 使用
             currentPlayInfo = playInfo;
