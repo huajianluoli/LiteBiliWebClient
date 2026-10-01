@@ -1818,6 +1818,8 @@ app.get("/api/favorites/:mediaId", async (req, res) => {
     res.json({
       info: j.data?.info || null,
       list: (j.data?.medias || []).map(normalizeVideo),
+      total: j.data?.info?.media_count ?? (j.data?.medias || []).length,
+      hasMore: !!j.data?.has_more,
     });
   } catch {
     res.status(500).json({ error: "收藏内容获取失败" });
