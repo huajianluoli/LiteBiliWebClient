@@ -762,6 +762,8 @@ function setTabCount(key, count) {
 
 function activateTab(key) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === key));
+  // 离开收藏夹内容页后清空来源标记，避免其它 tab 的视频误带 from 参数
+  if (key !== 'fav') _curFavId = '';
   ({ videos: loadVideos, history: loadHistory, fav: loadFavs, following: loadRelList, follower: loadRelList })[key]();
 }
 
@@ -815,7 +817,11 @@ function renderProfile(u, isSelf) {
   // 卡片点击：整个面板只绑一次（事件委托）
   panelEl().addEventListener('click', (e) => {
     const c = e.target.closest('.card');
-    if (c && c.dataset.bvid) location.href = '/player?bv=' + encodeURIComponent(c.dataset.bvid);
+    if (c && c.dataset.bvid) {
+      // 从收藏夹内容页点进去时带上 from 参数，player 会把整个收藏夹渲染进选集框
+      const from = _curFavId ? '&from=' + encodeURIComponent(_curFavId) : '';
+      location.href = '/player?bv=' + encodeURIComponent(c.dataset.bvid) + from;
+    }
   });
   document.getElementById('tabs').addEventListener('click', (e) => {
     const b = e.target.closest('.tab');
@@ -985,6 +991,9 @@ async function loadFavs() {
   }
 }
 
+// ============ 收藏夹内容 ============
+let _curFavId = '';   // 当前正在浏览的收藏夹 id，点视频跳转时带给 player
+
 async function loadFavContent(id, stillCurrent) {
   const box = document.getElementById('favContent');
   if (!box) return;
@@ -994,6 +1003,7 @@ async function loadFavContent(id, stillCurrent) {
     const d = await r.json();
     if (!stillCurrent()) return;
     if (!r.ok) { box.innerHTML = `<div class="empty">${esc(d.error || '加载失败')}</div>`; return; }
+    _curFavId = id;
     box.innerHTML = d.list?.length ? `<div class="grid">${d.list.map(v => card(v)).join('')}</div>` : '<div class="empty">这个收藏夹暂时没有视频</div>';
   } catch (e) {
     if (stillCurrent()) box.innerHTML = `<div class="empty">${esc(e.message || '加载失败')}</div>`;

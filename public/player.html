@@ -1220,14 +1220,13 @@
         window.__artReady = (function () {
             const SOURCES = {
                 art: [
-                    'https://cdn.jsdelivr.net/npm/artplayer@5.1.7/dist/artplayer.js',
                     'https://cdn.staticfile.org/artplayer/5.1.7/artplayer.js',
                     'https://cdn.bootcdn.net/ajax/libs/artplayer/5.1.7/artplayer.js',
                     '/vendor/artplayer.js'
                 ],
                 dm: [
-                    'https://cdn.jsdelivr.net/npm/artplayer-plugin-danmuku@5/dist/artplayer-plugin-danmuku.js',
-                    'https://unpkg.com/artplayer-plugin-danmuku@5/dist/artplayer-plugin-danmuku.js',
+                    'https://cdn.staticfile.org/artplayer-plugin-danmuku/5.3.0/artplayer-plugin-danmuku.js',
+                    'https://cdn.bootcdn.net/ajax/libs/artplayer-plugin-danmuku/5.3.0/artplayer-plugin-danmuku.js',
                     '/vendor/artplayer-plugin-danmuku.js'
                 ]
             };
@@ -1489,17 +1488,8 @@
     </div>
 
     <script>
-        // —— 主题切换接口（暂未接入设置页，先留好） ——
-        window.setTheme = function(theme) {
-            // 目前只实现了深色主题；后续在设置页中接入 light 主题时，在这里扩展 CSS 变量即可。
-            document.documentElement.setAttribute('data-theme', theme || 'dark');
-            try { localStorage.setItem('bili_theme', theme || 'dark'); } catch (e) {}
-        };
-        (function initTheme() {
-            let saved = 'dark';
-            try { saved = localStorage.getItem('bili_theme') || 'dark'; } catch (e) {}
-            window.setTheme(saved);
-        })();
+        // —— 主题切换：由 <head> 顶部脚本按页面类型读取 bili_player_theme / bili_theme 设置，
+        // 这里不再覆盖 data-theme，避免设置页的"播放器深色模式"开关失效 ——
 
         // —— 登录凭证：完整 B 站 cookies 存 localStorage，请求时用 X-Bili-Cookie 头带给服务端 ——
         // 服务端不落盘，换电脑/换服务器只要浏览器有这份 localStorage，登录态就不丢。
@@ -1738,6 +1728,82 @@
                     }
                 };
                 episodeList.appendChild(el);
+            });
+        }
+
+        /* ------------------------- 收藏夹来源模式 -------------------------
+         * 从 /account 收藏夹点进播放器时 URL 带 from=<收藏夹 media_id>，
+         * 把该收藏夹的全部视频渲染进选集框（跟分 P 一样），
+         * 收藏夹里的多 P 视频同样展开它的全部分 P。
+         * ----------------------------------------------------------------- */
+        let favListCache = null;   // [{bvid,title,pages:[]}]
+        let favFromId = '';
+        (function parseFavFrom() {
+            try { favFromId = new URLSearchParams(window.location.search).get('from') || ''; } catch (e) {}
+        })();
+
+        async function loadFavEpisodes() {
+            if (!favFromId) return;
+            try {
+                const r = await fetch('/api/favorites/' + encodeURIComponent(favFromId));
+                const d = await r.json();
+                if (!r.ok || !d.list?.length) return;
+                // 并行拉每个视频的分 P 信息
+                const withPages = await Promise.allSettled(d.list.map(async (v) => {
+                    if (!v.bvid) return { ...v, pages: [] };
+                    try {
+                        const ir = await fetch('/api/info?bv=' + encodeURIComponent(v.bvid));
+                        const id = await ir.json();
+                        return { ...v, pages: (id.code === 0 && Array.isArray(id.pages)) ? id.pages : [] };
+                    } catch (e) { return { ...v, pages: [] }; }
+                }));
+                favListCache = withPages
+                    .map(x => x.status === 'fulfilled' ? x.value : null)
+                    .filter(v => v && v.bvid);
+                renderFavEpisodes();
+            } catch (e) {}
+        }
+
+        function renderFavEpisodes() {
+            const episodeBox = document.getElementById('episodeBox');
+            const episodeList = document.getElementById('episodeList');
+            if (!favListCache || favListCache.length <= 1) {
+                episodeBox.classList.remove('show');
+                episodeList.classList.remove('show');
+                return;
+            }
+            episodeBox.classList.add('show');
+            episodeList.classList.add('show');
+            episodeList.innerHTML = '';
+            favListCache.forEach((v) => {
+                const isMulti = v.pages && v.pages.length > 1;
+                const mainActive = currentBvid === v.bvid && (!isMulti || currentPage === 1);
+                const main = document.createElement('div');
+                main.className = 'episode-item' + (mainActive ? ' active' : '');
+                main.textContent = v.title;
+                main.style.fontWeight = '600';
+                main.title = v.title;
+                main.onclick = () => {
+                    document.getElementById('vidInput').value = v.bvid;
+                    currentPage = 1;
+                    startPlay();
+                };
+                episodeList.appendChild(main);
+                if (isMulti) {
+                    v.pages.forEach((pg) => {
+                        const el = document.createElement('div');
+                        el.className = 'episode-item' + (currentBvid === v.bvid && currentPage === pg.page ? ' active' : '');
+                        el.textContent = `P${pg.page}  ${pg.part}`;
+                        el.style.paddingLeft = '32px';
+                        el.style.fontSize = '12px';
+                        el.onclick = () => {
+                            document.getElementById('vidInput').value = v.bvid;
+                            currentPage = pg.page;
+                            startPlay();
+                        };
+                        episodeList.appendChild(el);
+                    });
+                }
             });
         }
 
@@ -3350,8 +3416,10 @@
                     renderMetaLine(pubEl, data.code === 0 ? data : null);
 
                     renderDescBox(data.code === 0 ? data.desc : '');
-                    // 番剧分集优先（从 ep2bv 拿到的），否则用普通多 P
-                    if (window._episodes && window._episodes.length > 1) {
+                    // 收藏夹来源优先（收藏夹视频列表），否则番剧分集优先，否则普通多 P
+                    if (favListCache && favListCache.length > 1) {
+                        renderFavEpisodes();
+                    } else if (window._episodes && window._episodes.length > 1) {
                         renderBangumiEpisodes(window._episodes, currentBvid);
                     } else {
                         renderEpisodeBox(data.code === 0 ? data.pages : [], p);
@@ -3469,6 +3537,8 @@
                 document.getElementById('vidInput').value = bv || `av${av}`;
                 if (p) currentPage = parseInt(p, 10) || 1;
                 startPlay();
+                // 收藏夹来源：后台拉取收藏夹视频列表，加载完自动渲染进选集框
+                loadFavEpisodes();
             }
         }
 
