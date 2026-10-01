@@ -997,17 +997,34 @@ let _curFavId = '';   // 当前正在浏览的收藏夹 id，点视频跳转时�
 async function loadFavContent(id, stillCurrent) {
   const box = document.getElementById('favContent');
   if (!box) return;
-  box.innerHTML = '<div class="loading">正在加载…</div>';
-  try {
-    const r = await fetch('/api/favorites/' + encodeURIComponent(id));
-    const d = await r.json();
-    if (!stillCurrent()) return;
-    if (!r.ok) { box.innerHTML = `<div class="empty">${esc(d.error || '加载失败')}</div>`; return; }
-    _curFavId = id;
-    box.innerHTML = d.list?.length ? `<div class="grid">${d.list.map(v => card(v)).join('')}</div>` : '<div class="empty">这个收藏夹暂时没有视频</div>';
-  } catch (e) {
-    if (stillCurrent()) box.innerHTML = `<div class="empty">${esc(e.message || '加载失败')}</div>`;
-  }
+  _curFavId = id;
+  const grid = makeGrid(box);
+  let page = 1;
+  const fetchPage = async () => {
+    try {
+      const r = await fetch(`/api/favorites/${encodeURIComponent(id)}?pn=${page}&ps=20`);
+      const d = await r.json();
+      if (!stillCurrent()) return;
+      if (!r.ok) {
+        if (page === 1) box.innerHTML = `<div class="empty">${esc(d.error || '加载失败')}</div>`;
+        else grid.moreError(fetchPage);
+        return;
+      }
+      if (!d.list?.length) {
+        if (page === 1) { box.innerHTML = '<div class="empty">这个收藏夹暂时没有视频</div>'; return; }
+        grid.more(false, fetchPage);
+        return;
+      }
+      grid.append(d.list);
+      page++;
+      grid.more(d.hasMore, fetchPage);
+    } catch (e) {
+      if (!stillCurrent()) return;
+      if (page === 1) box.innerHTML = `<div class="empty">${esc(e.message || '加载失败')}</div>`;
+      else grid.moreError(fetchPage);
+    }
+  };
+  fetchPage();
 }
 
 // ============ 关注的人 / 粉丝 ============

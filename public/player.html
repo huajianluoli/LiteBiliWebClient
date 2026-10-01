@@ -645,6 +645,13 @@
             background: var(--gffffff);
             color: var(--g000000);
         }
+        .episode-more {
+            padding: 10px 16px;
+            font-size: 12px;
+            text-align: center;
+            color: var(--g666666);
+            user-select: none;
+        }
         /* 输入框 */
         input {
             flex: 1;
@@ -1234,8 +1241,27 @@
                 return new Promise(function (resolve, reject) {
                     var s = document.createElement('script');
                     s.src = url;
-                    s.onload = function () { resolve(url); };
-                    s.onerror = function () { s.remove(); reject(new Error('加载失败 ' + url)); };
+                    var done = false;
+                    // CDN 挂起时不能无限等：8 秒没加载完就判失败，换下一个源
+                    var timer = setTimeout(function () {
+                        if (done) return;
+                        done = true;
+                        s.remove();
+                        reject(new Error('加载超时 ' + url));
+                    }, 8000);
+                    s.onload = function () {
+                        if (done) return;
+                        done = true;
+                        clearTimeout(timer);
+                        resolve(url);
+                    };
+                    s.onerror = function () {
+                        if (done) return;
+                        done = true;
+                        clearTimeout(timer);
+                        s.remove();
+                        reject(new Error('加载失败 ' + url));
+                    };
                     document.head.appendChild(s);
                 });
             }
@@ -1738,31 +1764,73 @@
          * ----------------------------------------------------------------- */
         let favListCache = null;   // [{bvid,title,pages:[]}]
         let favFromId = '';
+        let _favPage = 1;
+        let _favHasMore = false;
+        let _favLoading = false;
         (function parseFavFrom() {
             try { favFromId = new URLSearchParams(window.location.search).get('from') || ''; } catch (e) {}
         })();
 
+        async function _fetchFavPage(pn) {
+            const r = await fetch(`/api/favorites/${encodeURIComponent(favFromId)}?pn=${pn}&ps=20`);
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || '加载失败');
+            return d;
+        }
+
+        async function _loadFavPage(pn, append) {
+            if (_favLoading) return;
+            _favLoading = true;
+            try {
+                const d = await _fetchFavPage(pn);
+                const list = (d.list || []).filter(v => v && v.bvid);
+                if (!append) favListCache = [];
+                if (list.length) {
+                    // 并行拉每个视频的分 P 信息
+                    const withPages = await Promise.allSettled(list.map(async (v) => {
+                        try {
+                            const ir = await fetch('/api/info?bv=' + encodeURIComponent(v.bvid));
+                            const id = await ir.json();
+                            return { ...v, pages: (id.code === 0 && Array.isArray(id.pages)) ? id.pages : [] };
+                        } catch (e) { return { ...v, pages: [] }; }
+                    }));
+                    favListCache = favListCache.concat(
+                        withPages.map(x => x.status === 'fulfilled' ? x.value : null).filter(v => v && v.bvid)
+                    );
+                }
+                _favHasMore = !!d.hasMore;
+                _favPage = pn + 1;
+                renderFavEpisodes();
+            } catch (e) {
+                // 加载失败静默处理：滚动到底部会自动重试
+            } finally {
+                _favLoading = false;
+            }
+        }
+
         async function loadFavEpisodes() {
             if (!favFromId) return;
-            try {
-                const r = await fetch('/api/favorites/' + encodeURIComponent(favFromId));
-                const d = await r.json();
-                if (!r.ok || !d.list?.length) return;
-                // 并行拉每个视频的分 P 信息
-                const withPages = await Promise.allSettled(d.list.map(async (v) => {
-                    if (!v.bvid) return { ...v, pages: [] };
-                    try {
-                        const ir = await fetch('/api/info?bv=' + encodeURIComponent(v.bvid));
-                        const id = await ir.json();
-                        return { ...v, pages: (id.code === 0 && Array.isArray(id.pages)) ? id.pages : [] };
-                    } catch (e) { return { ...v, pages: [] }; }
-                }));
-                favListCache = withPages
-                    .map(x => x.status === 'fulfilled' ? x.value : null)
-                    .filter(v => v && v.bvid);
-                renderFavEpisodes();
-            } catch (e) {}
+            favListCache = null;
+            _favPage = 1;
+            _favHasMore = false;
+            await _loadFavPage(1, false);
         }
+
+        async function loadFavMore() {
+            if (!favFromId || _favLoading || !_favHasMore || !favListCache) return;
+            await _loadFavPage(_favPage, true);
+        }
+
+        // 选集列表滚动到底部时自动加载收藏夹下一页
+        (function bindFavScroll() {
+            const list = document.getElementById('episodeList');
+            if (!list) return;
+            list.addEventListener('scroll', () => {
+                if (list.scrollTop + list.clientHeight >= list.scrollHeight - 60) {
+                    loadFavMore();
+                }
+            }, { passive: true });
+        })();
 
         function renderFavEpisodes() {
             const episodeBox = document.getElementById('episodeBox');
@@ -1805,6 +1873,13 @@
                     });
                 }
             });
+            // 收藏夹来源：底部加载更多提示
+            if (favFromId) {
+                const tip = document.createElement('div');
+                tip.className = 'episode-more';
+                tip.textContent = _favLoading ? '加载中…' : (_favHasMore ? '↓ 下滑加载更多' : (favListCache.length > 20 ? '已全部加载' : ''));
+                episodeList.appendChild(tip);
+            }
         }
 
         function toggleDesc() {
@@ -3208,11 +3283,44 @@
                 startPlay();
                 return;
             }
-            // 顺序播放（或随机但只有一 P）：有下一集就接着播，到头就停
+            // 顺序播放（或随机但只有一 P）：有下一集就接着播
             if (currentPage < total) {
                 currentPage += 1;
                 startPlay();
+                return;
             }
+            // 当前视频的 P 已播完：收藏夹模式下自动续播下一个视频，
+            // 播到已加载列表最底部时自动加载收藏夹下一页，无需手动下滑刷新。
+            if (favFromId && favListCache && favListCache.length) {
+                const idx = favListCache.findIndex(v => v.bvid === currentBvid);
+                if (idx >= 0) {
+                    if (idx + 1 < favListCache.length) {
+                        playFavVideo(idx + 1);
+                        return;
+                    }
+                    if (_favHasMore && !_favLoading) {
+                        showToast('已播完当前列表，正在加载更多…');
+                        loadFavMore().then(() => {
+                            const nidx = favListCache.findIndex(v => v.bvid === currentBvid);
+                            if (nidx >= 0 && nidx + 1 < favListCache.length) {
+                                playFavVideo(nidx + 1);
+                            } else {
+                                showToast('收藏夹已全部播放完');
+                            }
+                        });
+                        return;
+                    }
+                }
+            }
+            // 到头就停
+        }
+
+        function playFavVideo(idx) {
+            const v = favListCache[idx];
+            if (!v || !v.bvid) return;
+            document.getElementById('vidInput').value = v.bvid;
+            currentPage = 1;
+            startPlay();
         }
 
         function setPlayerModeUI(mode) {
@@ -3513,7 +3621,9 @@
             }
         }
 
-        window.onload = async function() {
+        // 立即执行而不是挂在 window.onload：onload 会等待 head 里动态插入的
+        // Artplayer 脚本全部加载完，CDN 挂起时页面会一直停在"等待解析"。
+        (async function initFromUrl() {
             const params = new URLSearchParams(window.location.search);
             const bv = params.get('bv');
             const av = params.get('av');
@@ -3540,7 +3650,7 @@
                 // 收藏夹来源：后台拉取收藏夹视频列表，加载完自动渲染进选集框
                 loadFavEpisodes();
             }
-        }
+        })();
 
         window.addEventListener('pagehide', () => {
             sendHistoryHeartbeat(false);
