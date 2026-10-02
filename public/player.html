@@ -3258,11 +3258,25 @@
         function destroyAudioPlayer() {
             if (!audioEl) return;
             try { audioEl.pause(); } catch (e) {}
-            audioEl.oncanplay = null;
-            audioEl.onerror = null;
             audioEl.removeAttribute('src');
             try { audioEl.load(); } catch (e) {}
             audioEl = null;
+        }
+
+        // 浏览器自动播放策略：无用户手势时"有声"play() 会被拦截（NotAllowedError）。
+        // 不做静音兜底——目标场景是息屏听歌，静音播放没有意义；
+        // 被拦截时保持暂停，提示用户开屏后点播放键继续。
+        async function playAudioElement(el) {
+            try {
+                await el.play();
+                return true;
+            } catch (err) {
+                setAudioPlayIcon(false);
+                if (err && err.name === 'NotAllowedError') {
+                    showToast('自动连播被浏览器拦截，开屏后点播放键继续');
+                }
+                return false;
+            }
         }
 
         function handleAudioEnded() {
@@ -3270,7 +3284,7 @@
             if (audioLoopMode === 'single') {
                 if (audioEl) {
                     audioEl.currentTime = 0;
-                    audioEl.play().catch(() => {});
+                    playAudioElement(audioEl);
                 }
                 return;
             }
@@ -3365,7 +3379,6 @@
         async function loadAudioForCurrent(resumeAt) {
             if (!audioModeActive) return;
             if (!currentAid && !currentBvid) return;
-            destroyAudioPlayer();
             renderAudioMeta();
             renderAudioEpisodeButtons();
             renderAudioLoopBtn();
@@ -3382,24 +3395,34 @@
                     throw new Error(data.message || '获取音频失败');
                 }
 
-                audioEl = new Audio();
-                audioEl.preload = 'auto';
+                // 复用同一个 audio 元素：自动连播（无用户手势）时，浏览器对
+                // "已被用户播放过"的元素换源继续播放行率高；新建元素更容易被拦。
+                if (!audioEl) {
+                    audioEl = new Audio();
+                    audioEl.preload = 'auto';
+                    audioEl.addEventListener('loadedmetadata', () => {
+                        if (resumeAt > 0) {
+                            try { audioEl.currentTime = resumeAt; } catch (e) {}
+                        }
+                        updateAudioProgressUI();
+                    });
+                    audioEl.addEventListener('timeupdate', updateAudioProgressUI);
+                    audioEl.addEventListener('play', () => setAudioPlayIcon(true));
+                    audioEl.addEventListener('pause', () => setAudioPlayIcon(false));
+                    audioEl.addEventListener('ended', handleAudioEnded);
+                    audioEl.addEventListener('error', () => {
+                        if (audioModeActive) audioFallbackToVideo('audio element error');
+                    });
+                } else {
+                    try { audioEl.pause(); } catch (e) {}
+                }
                 audioEl.src = `/api/audio/proxy?src=${encodeURIComponent(data.audioUrl)}`;
-                audioEl.addEventListener('loadedmetadata', () => {
-                    if (resumeAt > 0) {
-                        try { audioEl.currentTime = resumeAt; } catch (e) {}
-                    }
-                    updateAudioProgressUI();
-                });
-                audioEl.addEventListener('timeupdate', updateAudioProgressUI);
-                audioEl.addEventListener('play', () => setAudioPlayIcon(true));
-                audioEl.addEventListener('pause', () => setAudioPlayIcon(false));
-                audioEl.addEventListener('ended', handleAudioEnded);
-                audioEl.addEventListener('error', () => {
-                    if (audioModeActive) audioFallbackToVideo('audio element error');
-                });
+                try { audioEl.load(); } catch (e) {}
 
-                await audioEl.play().catch(() => { setAudioPlayIcon(false); });
+                await playAudioElement(audioEl);
+                if (resumeAt > 0 && audioEl) {
+                    try { audioEl.currentTime = resumeAt; } catch (e) {}
+                }
             } catch (err) {
                 audioFallbackToVideo(err.message || 'fetch failed');
             }
