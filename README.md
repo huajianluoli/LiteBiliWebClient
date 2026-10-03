@@ -1,6 +1,6 @@
 # Lite Bili Web Client
 
-> 基于 Node.js + Express 的自制 B 站网页客户端。手机（Termux）可作后端，任意设备浏览器访问。
+> 基于 Node.js + Express 的自制 B 站网页客户端。兼容WebView。
 
 ## 运行
 
