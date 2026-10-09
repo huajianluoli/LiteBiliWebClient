@@ -356,6 +356,12 @@
   }
   .card:hover .thumb img { transform: scale(1.03); }
   .card:hover .title { color: var(--pink); }
+  /* 历史记录播放进度条：缩略图底部一条粉色进度 */
+  .prog-track {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+    background: rgba(0, 0, 0, .38);
+  }
+  .prog-fill { display: block; height: 100%; background: #FB7299; }
   .title {
     font-size: 14px; line-height: 1.4; margin: 8px 0 4px;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
@@ -472,7 +478,7 @@
           <rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.6"/>
           <path d="M4 7l8 5 8-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
-      </a>
+      <span class="nav-badge" id="navMsgBadge" style="display:none"></span></a>
 
       <a class="user-icon" href="/account?tab=fav" title="收藏">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -619,9 +625,20 @@ function card(v, o = {}) {
   if (o.author !== false && v.author) meta.push(esc(v.author));
   if (v.play != null) meta.push(Number(v.play).toLocaleString() + '播放');
   if (o.date && v.pubdate) meta.push(fmtDate(v.pubdate));
-  const dur = v.duration > 0 ? `<span class="dur">${fmtDur(v.duration)}</span>` : '';
-  return `<div class="card" data-bvid="${esc(v.bvid)}">
-    <div class="thumb"><img src="${esc(v.pic || '')}" referrerpolicy="no-referrer" loading="lazy">${dur}</div>
+  // 历史记录：progress 是上次看到第几秒（-1=看完），显示进度条 + "看到位置 / 总时长"
+  const progPct = v.progress > 0 && v.duration > 0
+    ? Math.min(100, (v.progress / v.duration) * 100) : null;
+  const durText = v.duration > 0
+    ? (v.progress > 0 ? `${fmtDur(v.progress)} / ${fmtDur(v.duration)}` : fmtDur(v.duration))
+    : '';
+  const dur = v.duration > 0 ? `<span class="dur">${durText}</span>` : '';
+  const progBar = progPct != null
+    ? `<span class="prog-track"><span class="prog-fill" style="width:${progPct.toFixed(1)}%"></span></span>` : '';
+  // 跳转续播：分 P 带 p 参数，未看完带 t 参数（秒）
+  const pageAttr = v.page && v.page > 1 ? ` data-page="${esc(v.page)}"` : '';
+  const tAttr = v.progress > 0 ? ` data-t="${Math.floor(v.progress)}"` : '';
+  return `<div class="card" data-bvid="${esc(v.bvid)}"${pageAttr}${tAttr}>
+    <div class="thumb"><img src="${esc(v.pic || '')}" referrerpolicy="no-referrer" loading="lazy">${dur}${progBar}</div>
     <div class="title">${esc(v.title || '')}</div>
     <div class="meta">${meta.join(' · ')}</div>
   </div>`;
@@ -818,9 +835,12 @@ function renderProfile(u, isSelf) {
   panelEl().addEventListener('click', (e) => {
     const c = e.target.closest('.card');
     if (c && c.dataset.bvid) {
+      // 历史记录续播：分 P 带 p、上次进度带 t（秒）
+      const page = c.dataset.page ? '&p=' + encodeURIComponent(c.dataset.page) : '';
+      const t = c.dataset.t ? '&t=' + encodeURIComponent(c.dataset.t) : '';
       // 从收藏夹内容页点进去时带上 from 参数，player 会把整个收藏夹渲染进选集框
       const from = _curFavId ? '&from=' + encodeURIComponent(_curFavId) : '';
-      location.href = '/player?bv=' + encodeURIComponent(c.dataset.bvid) + from;
+      location.href = '/player?bv=' + encodeURIComponent(c.dataset.bvid) + page + t + from;
     }
   });
   document.getElementById('tabs').addEventListener('click', (e) => {
@@ -1111,5 +1131,6 @@ async function load() {
 }
 load();
 </script>
+<script src="/msg-badge.js" defer></script>
 </body>
 </html>
