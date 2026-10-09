@@ -157,6 +157,15 @@ async function biliFetch(url, options = {}, session = null) {
     ...(options.headers || {}),
   };
 
+  // B 站风控：写操作（点赞/投币/收藏/评论/弹幕/关注）缺 Origin 时容易被上游
+  // 判定"不是浏览器发的"，概率性 -352。这里统一给 POST 补上 Origin 与 Referer，
+  // 个别已经自定义的（直播/动态域）不会被覆盖。
+  const isPost = (options.method || "GET").toUpperCase() === "POST";
+  if (isPost) {
+    headers.Origin = headers.Origin || "https://www.bilibili.com";
+    headers.Referer = headers.Referer || COMMON_HEADERS.Referer;
+  }
+
   let cookieStr = "";
   if (session?.cookies) {
     // 关键：登录会话里只有 SESSDATA/bili_jct/DedeUserID，没有 buvid3。
@@ -1349,6 +1358,7 @@ app.get("/api/comments", async (req, res) => {
   const bvid = String(req.query.bv || "").trim();
   const aid = parseInt(req.query.av || "", 10) || 0;
   const next = parseInt(req.query.next, 10) || 0;
+  const seekRpid = String(req.query.seek_rpid || "").trim();
   if (!bvid && !aid) return res.status(400).json({ error: "缺少 bv 或 av 参数" });
 
   try {
@@ -1362,6 +1372,9 @@ app.get("/api/comments", async (req, res) => {
     u.searchParams.set("mode", "3");
     u.searchParams.set("next", String(next));
     u.searchParams.set("plat", "1");
+    // 刚发完评论后拉第一页时带上 seek_rpid：把这条 0 赞新评论稳定置顶，
+    // 否则"最热"排序下自己刚发的评论挤不进第一页，刷新就"消失"。
+    if (seekRpid && next === 0) u.searchParams.set("seek_rpid", seekRpid);
 
     const j = await (await biliFetch(u.toString(), {}, session)).json();
     if (j.code !== 0) return res.status(502).json({ error: j.message || "评论加载失败" });
@@ -1463,7 +1476,13 @@ app.post("/api/comments/send", async (req, res) => {
     if (j.code !== 0) {
       return res.status(502).json({ error: (j.message || "发送评论失败") + "（code=" + j.code + "）" });
     }
-    res.json({ ok: true, reply: j.data?.reply ? normalizeReply(j.data.reply) : null });
+    // rpid 单独给一份：前端拿它当 seek_rpid 用，把这条评论顶到列表最前面
+    const upReply = j.data?.reply;
+    res.json({
+      ok: true,
+      rpid: j.data?.rpid ? String(j.data.rpid) : (upReply?.rpid ? String(upReply.rpid) : ""),
+      reply: upReply ? normalizeReply(upReply) : null,
+    });
   } catch {
     res.status(500).json({ error: "发送评论失败" });
   }
