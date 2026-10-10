@@ -1187,12 +1187,15 @@ app.post("/api/video/like", async (req, res) => {
   }
 
   try {
-    const body = new URLSearchParams({
+    // 点赞 2023 起强制 WBI 签名：老接口 x/web-interface/archive/like 是风控重灾区，
+    // 改成 wbi 后缀 + 全参数签名后才跟网页端行为一致。
+    const signedParams = await signWbi({
       like: String(like),
-      csrf: session.cookies.bili_jct,
-    });
-    if (bvid) body.set("bvid", bvid); else body.set("aid", String(aid));
-    const j = await (await biliFetch("https://api.bilibili.com/x/web-interface/archive/like", {
+      csrf: session.cookies.bili_jct || "",
+      ...(bvid ? { bvid } : { aid: String(aid) }),
+    }, session);
+    const body = new URLSearchParams(signedParams);
+    const j = await (await biliFetch("https://api.bilibili.com/x/web-interface/wbi/archive/like", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -1226,14 +1229,16 @@ app.post("/api/video/coin", async (req, res) => {
   }
 
   try {
-    const body = new URLSearchParams({
+    // 投币同上：2023 起强制 WBI 签名，老接口 x/web-interface/coin/add 概率 -352。
+    const signedParams = await signWbi({
       multiply: String(multiply),
       select_like: selectLike,
-      csrf: session.cookies.bili_jct,
+      csrf: session.cookies.bili_jct || "",
       cross_domain: "true",
-    });
-    if (bvid) body.set("bvid", bvid); else body.set("aid", String(aid));
-    const j = await (await biliFetch("https://api.bilibili.com/x/web-interface/coin/add", {
+      ...(bvid ? { bvid } : { aid: String(aid) }),
+    }, session);
+    const body = new URLSearchParams(signedParams);
+    const j = await (await biliFetch("https://api.bilibili.com/x/web-interface/wbi/coin/add", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
