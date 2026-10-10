@@ -10,7 +10,13 @@
   // 顶栏角标样式统一在这里注入，各页面不用各自维护
   (function injectStyle() {
     var s = document.createElement('style');
-    s.textContent = '.user-icon{position:relative}.nav-badge#navMsgBadge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--pink,#FB7299);color:#fff;font-size:11px;font-weight:700;position:absolute;top:-6px;right:-8px;z-index:5;box-sizing:border-box;line-height:1}';
+    s.textContent = '.user-icon{position:relative}' +
+      // 小号胶囊角标：贴在图标右上角，单个数字是 14px 圆形，两位数/99+ 自动变宽
+      '.nav-badge#navMsgBadge{display:inline-flex;align-items:center;justify-content:center;' +
+      'box-sizing:border-box;min-width:14px;height:14px;padding:0 3.5px;border-radius:7px;' +
+      'background:var(--pink,#FB7299);color:#fff;font-size:9.5px;font-weight:600;line-height:1;' +
+      'font-variant-numeric:tabular-nums;letter-spacing:-.2px;' +
+      'position:absolute;top:2px;right:-2px;z-index:5;pointer-events:none}';
     document.head.appendChild(s);
   })();
 
