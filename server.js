@@ -26,17 +26,23 @@ const COOKIE_TTL_MS = 30 * 60 * 1000;
 
 // 持久化：data/ 文件夹保存 buvid3 和每个设备的登录 cookie，
 // 服务器重启后不用重新登录、不用冷启动等 buvid3。
+// 公网部署强烈建议 PERSIST_COOKIES=0：cookie 只存内存，重启即清，
+// 避免 B 站登录凭据长期明文落盘（平台管理员/入侵者拿不到）。
 const DATA_DIR = path.join(__dirname, "data");
 const COOKIE_FILE = path.join(DATA_DIR, "cookies.json");
+const PERSIST_COOKIES = process.env.PERSIST_COOKIES !== "0";
 let persistedCookies = { buvid3: "", devices: {} };
 try {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (fs.existsSync(COOKIE_FILE)) {
-    persistedCookies = JSON.parse(fs.readFileSync(COOKIE_FILE, "utf8"));
-    if (persistedCookies.buvid3) { cachedCookie = persistedCookies.buvid3; cookieFetchedAt = Date.now(); }
+  if (PERSIST_COOKIES) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(COOKIE_FILE)) {
+      persistedCookies = JSON.parse(fs.readFileSync(COOKIE_FILE, "utf8"));
+      if (persistedCookies.buvid3) { cachedCookie = persistedCookies.buvid3; cookieFetchedAt = Date.now(); }
+    }
   }
 } catch (e) { console.error("data/ 读取失败:", e.message); }
 function savePersistedCookies() {
+  if (!PERSIST_COOKIES) return; // 内存模式：不写盘
   try {
     persistedCookies.buvid3 = cachedCookie;
     fs.writeFileSync(COOKIE_FILE, JSON.stringify(persistedCookies, null, 2));
@@ -142,6 +148,25 @@ app.use((req, res, next) => {
   res.status(403).json({ error: "拒绝跨站请求（Origin 不匹配）" });
 });
 
+// 公网访问口令：设置环境变量 ACCESS_TOKEN 后启用。
+// 所有 /api/ 请求必须带 X-Access-Token 头（public/auth.js 自动附加），否则 403。
+// 不设置时行为完全不变（局域网直用）。静态页面本身可公开访问，
+// 敏感数据都在 /api/ 后面，口令挡住即可。
+const ACCESS_TOKEN = process.env.ACCESS_TOKEN || "";
+app.use((req, res, next) => {
+  if (!ACCESS_TOKEN) return next();
+  if (req.path === "/api/config") return next(); // 前端用它探测是否需要口令
+  if (req.path.startsWith("/api/") && req.get("X-Access-Token") !== ACCESS_TOKEN) {
+    return res.status(403).json({ error: "访问口令错误" });
+  }
+  next();
+});
+
+// 前端 auth.js 探测用：返回本服务是否开启了访问口令
+app.get("/api/config", (req, res) => {
+  res.json({ authRequired: !!ACCESS_TOKEN });
+});
+
 function requireSession(req, res) {
   const session = getSession(req);
   if (!session || !session.cookies.SESSDATA) {
@@ -150,6 +175,29 @@ function requireSession(req, res) {
   }
   return session;
 }
+
+// 直播弹幕 WebSocket 不能自定义 header，前端把 B 站 cookie 塞进 URL query
+// 在公网下会明文泄露（还会进平台访问日志）。改为：前端先调 /api/session/keep
+// 把 cookie 存进这个内存缓存（短 TTL），WS 连接只带 device_id，服务端按 id 取回。
+const wssCookieCache = new Map(); // deviceId -> { cookie, expires }
+const WSS_COOKIE_TTL = 60 * 60 * 1000; // 1 小时，随请求续期
+function getCachedWssCookie(deviceId) {
+  if (!deviceId) return "";
+  const hit = wssCookieCache.get(deviceId);
+  if (hit && hit.expires > Date.now()) return hit.cookie;
+  wssCookieCache.delete(deviceId);
+  return "";
+}
+
+// 前端在建立直播弹幕 WS 前调用：把当前设备的 B 站 cookie 缓存到内存
+app.post("/api/session/keep", (req, res) => {
+  const deviceId = String(req.headers["x-device-id"] || "").trim();
+  const raw = String(req.headers["x-bili-cookie"] || "").trim();
+  if (!deviceId || !raw) return res.status(400).json({ error: "缺少设备或会话信息" });
+  if (!parseCookieString(raw).SESSDATA) return res.status(400).json({ error: "无效会话" });
+  wssCookieCache.set(deviceId, { cookie: raw, expires: Date.now() + WSS_COOKIE_TTL });
+  res.json({ ok: true });
+});
 
 async function biliFetch(url, options = {}, session = null) {
   const headers = {
@@ -814,7 +862,7 @@ async function resolveCid({ aid, bvid, page = 1 }, session = null) {
   return { cid: target.cid, aid: data.aid, bvid: data.bvid };
 }
 
-async function fetchPlayUrl({ aid, bvid, cid, qn }, session = null) {
+async function fetchPlayUrl({ aid, bvid, cid, qn }, session = null, streamMode = "dash") {
   const buildBase = (pgc) => {
     const u = new URL(pgc
       ? "https://api.bilibili.com/pgc/player/web/playurl"
@@ -835,28 +883,34 @@ async function fetchPlayUrl({ aid, bvid, cid, qn }, session = null) {
   async function tryOne(pgc) {
     const base = buildBase(pgc);
     const headers = pgc ? { Referer: "https://www.bilibili.com/bangumi/play/" } : {};
-    const dashUrl = new URL(base.toString());
-    dashUrl.searchParams.set("fnval", pgc ? "4048" : "16");
-    const dashRes = await biliFetch(dashUrl.toString(), { headers }, session).then(r => r.json()).catch(() => null);
-    let dashData = (dashRes && dashRes.code === 0) ? (dashRes.result || dashRes.data) : null;
+    let dashData = null;
 
     let dash = null;
-    if (dashData?.dash?.video?.length) {
-      const wanted = qn ? dashData.dash.video.find((v) => Number(v.id) === Number(qn)) : null;
-      const video = wanted || dashData.dash.video[0];
-      const audio = dashData.dash.audio?.[0];
-      dash = {
-        video: video.baseUrl || video.base_url,
-        audio: audio ? (audio.baseUrl || audio.base_url) : null,
-        videoId: video.id,
-        audioId: audio ? audio.id : null,
-      };
-    }
-
     let fallbackUrl = "";
-    // DASH 响应里如果直接带了 durl（PGC 常见），先用它
-    if (!dash && dashData?.durl?.length) {
-      fallbackUrl = dashData.durl[0].url;
+    // 用户设置"视频流格式 = durl"时跳过 DASH 请求，直接走 fnval=0 的 DURL 直链；
+    // 默认 dash：先试 DASH，拿不到才兜底 DURL（保证能播）。
+    if (streamMode !== "durl") {
+      const dashUrl = new URL(base.toString());
+      dashUrl.searchParams.set("fnval", pgc ? "4048" : "16");
+      const dashRes = await biliFetch(dashUrl.toString(), { headers }, session).then(r => r.json()).catch(() => null);
+      dashData = (dashRes && dashRes.code === 0) ? (dashRes.result || dashRes.data) : null;
+
+      if (dashData?.dash?.video?.length) {
+        const wanted = qn ? dashData.dash.video.find((v) => Number(v.id) === Number(qn)) : null;
+        const video = wanted || dashData.dash.video[0];
+        const audio = dashData.dash.audio?.[0];
+        dash = {
+          video: video.baseUrl || video.base_url,
+          audio: audio ? (audio.baseUrl || audio.base_url) : null,
+          videoId: video.id,
+          audioId: audio ? audio.id : null,
+        };
+      }
+
+      // DASH 响应里如果直接带了 durl（PGC 常见），先用它
+      if (!dash && dashData?.durl?.length) {
+        fallbackUrl = dashData.durl[0].url;
+      }
     }
     if (!dash && !fallbackUrl) {
       const durlUrl = new URL(base.toString());
@@ -878,12 +932,16 @@ async function fetchPlayUrl({ aid, bvid, cid, qn }, session = null) {
   }
 
   let result = await tryOne(false);
-  if (!result) result = await tryOne(true); // PGC 番剧兜底
+  let isPgc = false;
+  if (!result) {
+    result = await tryOne(true); // PGC 番剧兜底
+    isPgc = !!result;
+  }
 
   if (!result) {
     throw new Error("未获取到可播放的直链");
   }
-  return result;
+  return { ...result, isPgc };
 }
 
 app.get("/api/play", async (req, res) => {
@@ -891,12 +949,13 @@ app.get("/api/play", async (req, res) => {
   const aid = parseInt(req.query.av || "", 10) || 0;
   const page = parseInt(req.query.p, 10) || 1;
   const qn = parseInt(req.query.qn, 10) || 0;
+  const stream = String(req.query.stream || "").trim() === "durl" ? "durl" : "dash";
   if (!bvid && !aid) return res.status(400).json({ code: 1, message: "缺少 bv 或 av 参数" });
 
   try {
     const session = getSession(req);
     const resolved = await resolveCid({ aid, bvid, page }, session);
-    const play = await fetchPlayUrl({ ...resolved, qn }, session);
+    const play = await fetchPlayUrl({ ...resolved, qn }, session, stream);
     res.json({ code: 0, ...resolved, page, ...play });
   } catch (e) {
     console.error(e);
@@ -971,20 +1030,25 @@ app.get("/api/audio", async (req, res) => {
     base.searchParams.set("platform", "html5");
     base.searchParams.set("high_quality", "1");
 
-    // 先试 DASH，拿码率最高的音频轨
-    const dashUrl = new URL(base.toString());
-    dashUrl.searchParams.set("fnval", "16");
-    const dashRes = await biliFetch(dashUrl.toString(), {}, session).then((r) => r.json()).catch(() => null);
-    const dashData = dashRes && dashRes.code === 0 ? dashRes.data : null;
+    // 用户设置"视频流格式 = durl"时跳过 DASH，直接走 DURL（与视频播放一致）
+    const stream = String(req.query.stream || "").trim() === "durl" ? "durl" : "dash";
 
-    if (dashData?.dash?.audio?.length) {
-      const bestAudio = [...dashData.dash.audio].sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0))[0];
-      return res.json({
-        code: 0,
-        audioUrl: bestAudio.baseUrl || bestAudio.base_url,
-        quality: bestAudio.id,
-        isDash: true,
-      });
+    if (stream !== "durl") {
+      // 先试 DASH，拿码率最高的音频轨
+      const dashUrl = new URL(base.toString());
+      dashUrl.searchParams.set("fnval", "16");
+      const dashRes = await biliFetch(dashUrl.toString(), {}, session).then((r) => r.json()).catch(() => null);
+      const dashData = dashRes && dashRes.code === 0 ? dashRes.data : null;
+
+      if (dashData?.dash?.audio?.length) {
+        const bestAudio = [...dashData.dash.audio].sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0))[0];
+        return res.json({
+          code: 0,
+          audioUrl: bestAudio.baseUrl || bestAudio.base_url,
+          quality: bestAudio.id,
+          isDash: true,
+        });
+      }
     }
 
     // 回退：fnval=0 拿 durl（视频+音频混流，只取地址当音频播）
@@ -2811,13 +2875,20 @@ try {
       try { ws.send(JSON.stringify({ cmd: "__error", message: "弹幕转发服务不可用" })); } catch {}
       return ws.close();
     }
-    // 浏览器把整串 B 站 cookie 放在 query 里带过来（WebSocket 不能自定义 header），
-    // 登录态调 getDanmuInfo 能显著降低 -352 风控概率。
+    // 浏览器不能给 WebSocket 自定义 header：新版前端先调 /api/session/keep 存 cookie，
+    // WS 只带 did（+公网口令 tk）；旧版前端直接带 cookie 参数，这里兼容两种情况。
     let session = null;
     try {
+      // 公网访问口令：启用了 ACCESS_TOKEN 时 WS 也必须带对 tk
+      if (ACCESS_TOKEN && urlp.searchParams.get("tk") !== ACCESS_TOKEN) {
+        try { ws.send(JSON.stringify({ cmd: "__error", message: "访问口令错误" })); } catch {}
+        return ws.close();
+      }
+      const deviceId = urlp.searchParams.get("did") || "";
       const rawCookie = urlp.searchParams.get("cookie") || "";
-      if (rawCookie) {
-        const cookies = parseCookieString(rawCookie);
+      const finalCookie = rawCookie || getCachedWssCookie(deviceId);
+      if (finalCookie) {
+        const cookies = parseCookieString(finalCookie);
         if (cookies.SESSDATA) session = { cookies, user: null, createdAt: 0, lastSeen: 0 };
       }
     } catch {}
