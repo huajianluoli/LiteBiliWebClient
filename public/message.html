@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
+<script src="/auth.js"></script>
 <script>(function(){try{var isP=/\/(player|stream)/.test(location.pathname);var k=isP?'bili_player_theme':'bili_theme';var d=isP?'dark':'light';var t=localStorage.getItem(k)||d;if(t!=='dark'&&t!=='light')t=d;document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -82,7 +83,7 @@
   .im-msg-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; background: #e7e8ea; flex-shrink: 0; }
   .im-msg-bubble { background: var(--bg); color: var(--text); padding: 9px 13px; border-radius: 10px; font-size: 13px; line-height: 1.6; word-break: break-all; }
   .im-msg-row.mine .im-msg-bubble { background: var(--pink); color: #fff; }
-  .im-msg-bubble img { max-width: 180px; border-radius: 8px; display: block; }
+  .im-msg-bubble img:not(.inline-emote) { max-width: 180px; border-radius: 8px; display: block; }
   .im-msg-bubble.revoked { color: var(--text-3); font-style: italic; background: transparent; padding: 0; }
   .im-chat-input-wrap { border-top: 1px solid var(--border); padding: 8px 18px 12px; }
   .im-chat-toolbar { display: flex; gap: 8px; margin-bottom: 6px; }
@@ -91,8 +92,8 @@
   .im-emote-pkg-name { font-size: 11px; color: var(--text-3); padding: 4px 2px; }
   .im-emote-grid { display: flex; flex-wrap: wrap; gap: 2px; }
   .im-emote-panel img { width: 32px; height: 32px; object-fit: contain; cursor: pointer; }
-  .inline-emote { width: 22px; height: 22px; vertical-align: middle; object-fit: contain; }
-  .im-msg-bubble img { max-width: 200px; border-radius: 8px; display: block; }
+  .inline-emote { display: inline; width: 22px; height: 22px; vertical-align: middle; object-fit: contain; }
+  .im-msg-bubble img:not(.inline-emote) { max-width: 200px; border-radius: 8px; display: block; }
   /* 表情输入框：contenteditable，表情以行内 <img> 插入（不换行） */
   .im-chat-input {
     width: 100%; min-height: 64px; max-height: 160px; overflow-y: auto;

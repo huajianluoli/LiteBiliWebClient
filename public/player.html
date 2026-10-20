@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+<script src="/auth.js"></script>
 <script>(function(){try{var isP=/\/(player|stream)/.test(location.pathname);var k=isP?'bili_player_theme':'bili_theme';var d=isP?'dark':'light';var t=localStorage.getItem(k)||d;if(t!=='dark'&&t!=='light')t=d;document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1545,6 +1546,11 @@
             if (!_deviceId) { _deviceId = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('bili_device_id', _deviceId); }
         } catch (e) {}
 
+        // —— 视频流格式：设置页"视频流格式"单选（bili_stream_mode），默认 dash ——
+        function _streamMode() {
+            try { return localStorage.getItem('bili_stream_mode') === 'durl' ? 'durl' : 'dash'; } catch (e) { return 'dash'; }
+        }
+
         const _origFetch = window.fetch.bind(window);
         window.fetch = (input, opts) => {
             opts = opts || {};
@@ -2901,9 +2907,13 @@
 
             console.warn('DASH 播放失败，自动降级到 720P:', reason);
 
-            // 用 durl 重新初始化
+            // 用 durl 重新初始化；代理条件与主路径一致（番剧或设置=durl 时走后端代理）
+            let fallbackUrl = currentPlayInfo.fallbackUrl;
+            if ((currentPlayInfo.isPgc || _streamMode() === 'durl') && fallbackUrl && fallbackUrl.includes('bilivideo.com')) {
+                fallbackUrl = '/api/video/proxy?src=' + encodeURIComponent(fallbackUrl);
+            }
             initPlayer(
-                { url: currentPlayInfo.fallbackUrl, quality: 64, accept_quality: [], accept_description: [] },
+                { url: fallbackUrl, quality: 64, accept_quality: [], accept_description: [] },
                 currentDanmakuList || []
             );
 
@@ -2947,8 +2957,13 @@
             const isDash = !!(playInfo.dash && playInfo.dash.video);
             // 非 DASH 时兼容两种来源：显式 url（降级时）或 fallbackUrl（纯 durl 视频）
             let videoUrl = isDash ? playInfo.dash.video : (playInfo.url || playInfo.fallbackUrl);
-            // PGC 番剧的 MP4 直链需要 Referer，走后端代理
-            if (!isDash && videoUrl && videoUrl.includes('bilivideo.com')) {
+            // 代理条件（不占服务器带宽优先）：
+            // 1) 番剧 PGC 的 MP4 直链需要 Referer，必须走后端代理；
+            // 2) 用户设置"视频流格式 = durl"时主动走后端代理（兼容受限网络/防盗链）。
+            // 普通视频的 durl 直链只校验 UA，浏览器直连即可，不再默认代理。
+            const proxyDurl = (playInfo.isPgc || _streamMode() === 'durl') &&
+                !isDash && videoUrl && videoUrl.includes('bilivideo.com');
+            if (proxyDurl) {
                 videoUrl = '/api/video/proxy?src=' + encodeURIComponent(videoUrl);
             }
 
@@ -3119,7 +3134,7 @@
             try {
                 const paramKey = currentBvid ? 'bv' : 'av';
                 const paramVal = currentBvid || currentAid;
-                const url = `/api/play?${paramKey}=${encodeURIComponent(paramVal)}&p=${currentPage || 1}&qn=${encodeURIComponent(qn)}`;
+                const url = `/api/play?${paramKey}=${encodeURIComponent(paramVal)}&p=${currentPage || 1}&qn=${encodeURIComponent(qn)}&stream=${_streamMode()}`;
                 const res = await fetch(url);
                 const data = await res.json();
                 if (!res.ok || data.code !== 0) throw new Error(data.message || '切换清晰度失败');
@@ -3407,6 +3422,7 @@
                 if (currentBvid) params.set('bvid', currentBvid);
                 if (currentAid) params.set('aid', String(currentAid));
                 if (currentCid) params.set('cid', String(currentCid));
+                params.set('stream', _streamMode());
                 const res = await fetch(`/api/audio?${params.toString()}`);
                 const data = await res.json();
                 if (!res.ok || data.code !== 0 || !data.audioUrl) {
@@ -3553,7 +3569,7 @@
             let paramType = input.toLowerCase().startsWith('av') ? 'av' : 'bv';
             let cleanId = input.replace(/av/i, '');
 
-            const apiUrl = `/api/play?${paramType}=${cleanId}&p=${p}`;
+            const apiUrl = `/api/play?${paramType}=${cleanId}&p=${p}&stream=${_streamMode()}`;
             const infoUrl = `/api/info?${paramType}=${cleanId}`;
 
             fetch(infoUrl)

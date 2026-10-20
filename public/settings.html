@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
+<script src="/auth.js"></script>
 <script>(function(){try{var isP=/\/(player|stream)/.test(location.pathname);var k=isP?'bili_player_theme':'bili_theme';var d=isP?'dark':'light';var t=localStorage.getItem(k)||d;if(t!=='dark'&&t!=='light')t=d;document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -224,6 +225,27 @@
   </div>
 
   <div class="settings-card">
+    <h2>视频流格式</h2>
+    <p class="desc">默认使用 DASH 分流（音视频直连 B 站 CDN，不占服务器带宽）；网络不兼容时可改用 DURL 直链。</p>
+    <div class="radio-group" id="streamRadioGroup">
+      <label class="radio-option" data-value="dash">
+        <input type="radio" name="streamMode" value="dash">
+        <div class="radio-option-body">
+          <div class="radio-option-title">DASH 分流（推荐）</div>
+          <div class="radio-option-desc">音视频分离直连 B 站 CDN，服务器只分发地址，带宽占用小</div>
+        </div>
+      </label>
+      <label class="radio-option" data-value="durl">
+        <input type="radio" name="streamMode" value="durl">
+        <div class="radio-option-body">
+          <div class="radio-option-title">DURL 直链</div>
+          <div class="radio-option-desc">经服务器代理拉流，兼容仅可访问服务器的受限网络（如部分 WebView）；会占用服务器带宽</div>
+        </div>
+      </label>
+    </div>
+  </div>
+
+  <div class="settings-card">
     <h2>消息页背景图</h2>
     <p class="desc">给整个"消息"页面设置一张背景图，留空则使用默认背景。</p>
     <input type="text" class="settings-input" id="msgBgUrl" placeholder="https://example.com/background.jpg">
@@ -379,6 +401,33 @@ document.getElementById('bannerClearBtn').addEventListener('click', () => {
   try { localStorage.removeItem('bili_banner_custom_url'); } catch (e) {}
   updateBannerPreview();
   flashSaved(bannerSaveHint);
+});
+
+/* ============ 视频流格式 ============ */
+const streamRadioGroup = document.getElementById('streamRadioGroup');
+let streamMode = 'dash';
+try { streamMode = localStorage.getItem('bili_stream_mode') || 'dash'; } catch (e) {}
+if (streamMode !== 'dash' && streamMode !== 'durl') streamMode = 'dash';
+function updateStreamRadioUI() {
+  streamRadioGroup.querySelectorAll('.radio-option').forEach(opt => {
+    const active = opt.dataset.value === streamMode;
+    opt.classList.toggle('active', active);
+    opt.querySelector('input').checked = active;
+  });
+}
+updateStreamRadioUI();
+streamRadioGroup.querySelectorAll('input[name="streamMode"]').forEach(input => {
+  input.addEventListener('change', () => {
+    streamMode = input.value;
+    try { localStorage.setItem('bili_stream_mode', streamMode); } catch (e) {}
+    updateStreamRadioUI();
+  });
+});
+streamRadioGroup.querySelectorAll('.radio-option').forEach(opt => {
+  opt.addEventListener('click', (e) => {
+    const input = opt.querySelector('input');
+    if (!input.checked) { input.checked = true; input.dispatchEvent(new Event('change')); }
+  });
 });
 
 /* ============ 消息页背景 ============ */

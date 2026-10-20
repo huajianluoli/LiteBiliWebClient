@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+<script src="/auth.js"></script>
 <script>(function(){try{var isP=/\/(player|stream)/.test(location.pathname);var k=isP?'bili_player_theme':'bili_theme';var d=isP?'dark':'light';var t=localStorage.getItem(k)||d;if(t!=='dark'&&t!=='light')t=d;document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -575,12 +576,22 @@ function appendChat(html, cls) {
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 let chatSocket = null;
-function connectChat() {
+async function connectChat() {
     if (!roomId) return;
     try {
         const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-        const cookieParam = encodeURIComponent(_cookieHeader());
-        chatSocket = new WebSocket(proto + location.host + '/ws/live?room_id=' + roomId + '&cookie=' + cookieParam);
+        // WebSocket 不能自定义 header：先把 B 站 cookie 存到服务端内存缓存
+        // （/api/session/keep，短 TTL），WS 只传 device_id，避免 cookie 明文进 URL。
+        try {
+            await fetch('/api/session/keep', {
+                method: 'POST',
+                headers: { 'X-Device-Id': _deviceId, 'X-Bili-Cookie': _cookieHeader() },
+            });
+        } catch (e) {}
+        const tk = (localStorage.getItem('access_token') || '');
+        chatSocket = new WebSocket(proto + location.host + '/ws/live?room_id=' + roomId
+            + '&did=' + encodeURIComponent(_deviceId)
+            + (tk ? '&tk=' + encodeURIComponent(tk) : ''));
     } catch (e) {
         setChatStatus('error', '实时评论不可用');
         return;
