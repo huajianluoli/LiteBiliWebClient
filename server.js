@@ -1251,18 +1251,19 @@ app.post("/api/video/like", async (req, res) => {
   }
 
   try {
-    // 点赞 2023 起强制 WBI 签名：老接口 x/web-interface/archive/like 是风控重灾区，
-    // 改成 wbi 后缀 + 全参数签名后才跟网页端行为一致。
-    const signedParams = await signWbi({
+    // 与 pilipawa 一致：点赞走老接口 x/web-interface/archive/like，只带 aid+like+csrf，
+    // 靠完整的登录 Cookie + Origin/Referer 通过风控，不做 WBI 签名（wbi 后缀接口
+    // 对设备指纹校验更严，缺 buvid 关联时反而更容易被拦）。
+    const body = new URLSearchParams({
+      aid: String(aid),
       like: String(like),
       csrf: session.cookies.bili_jct || "",
-      ...(bvid ? { bvid } : { aid: String(aid) }),
-    }, session);
-    const body = new URLSearchParams(signedParams);
-    const j = await (await biliFetch("https://api.bilibili.com/x/web-interface/wbi/archive/like", {
+    });
+    const j = await (await biliFetch("https://api.bilibili.com/x/web-interface/archive/like", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://www.bilibili.com",
         Referer: bvid
           ? `https://www.bilibili.com/video/${bvid}`
           : `https://www.bilibili.com/video/av${aid}`,
@@ -1293,19 +1294,20 @@ app.post("/api/video/coin", async (req, res) => {
   }
 
   try {
-    // 投币同上：2023 起强制 WBI 签名，老接口 x/web-interface/coin/add 概率 -352。
-    const signedParams = await signWbi({
+    // 与 pilipawa 一致：投币走老接口 x/web-interface/coin/add，只带 aid+multiply+cross_domain+csrf，
+    // 不做 WBI 签名（理由同点赞）。
+    const body = new URLSearchParams({
+      aid: String(aid),
       multiply: String(multiply),
       select_like: selectLike,
-      csrf: session.cookies.bili_jct || "",
       cross_domain: "true",
-      ...(bvid ? { bvid } : { aid: String(aid) }),
-    }, session);
-    const body = new URLSearchParams(signedParams);
-    const j = await (await biliFetch("https://api.bilibili.com/x/web-interface/wbi/coin/add", {
+      csrf: session.cookies.bili_jct || "",
+    });
+    const j = await (await biliFetch("https://api.bilibili.com/x/web-interface/coin/add", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://www.bilibili.com",
         Referer: bvid
           ? `https://www.bilibili.com/video/${bvid}`
           : `https://www.bilibili.com/video/av${aid}`,
