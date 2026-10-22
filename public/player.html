@@ -480,32 +480,85 @@
         }
         .player-actions {
             display: none;
-            gap: 8px;
+            gap: 28px;
+            align-items: center;
             flex-shrink: 0;
         }
         .player-actions.show { display: flex; }
         .player-action-btn {
-            display: flex;
+            position: relative;
+            display: inline-flex;
             align-items: center;
-            gap: 5px;
-            padding: 8px 12px;
-            border-radius: 999px;
-            border: 1px solid var(--g292929);
-            background: var(--g141414);
-            color: var(--gffffff);
-            font-size: 12px;
-            font-weight: 500;
+            gap: 10px;
+            padding: 0;
+            margin: 0;
+            border: none;
+            border-radius: 0;
+            background: transparent;
+            color: var(--g999999);
+            font-size: 14px;
+            font-weight: 400;
+            line-height: 1;
             cursor: pointer;
-            transition: background .15s ease, color .15s ease, border-color .15s ease;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
+            transition: color .15s ease;
         }
-        .player-action-btn svg { flex-shrink: 0; }
-        .player-action-btn:hover {
-            background: var(--g1f1f1f);
-            border-color: var(--g3a3a3a);
+        .player-action-btn.like { touch-action: none; }
+        .player-action-btn:hover { background: transparent; border: none; color: #00AEEC; }
+        .player-action-btn.active { color: #00AEEC; }
+        .pa-icon {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            flex-shrink: 0;
         }
-        .player-action-btn.like.active { color: #FB7299; border-color: #FB7299; }
-        .player-action-btn.coin.active { color: #FFC83D; border-color: #FFC83D; }
-        .player-action-btn.fav.active { color: #00AEEC; border-color: #00AEEC; }
+        .pa-svg { display: block; width: 28px; height: 28px; overflow: visible; }
+        .pa-svg .pa-fill { transition: fill .15s ease; }
+        .pa-svg text { fill: currentColor; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+        .player-action-btn.active .pa-svg .pa-fill { fill: currentColor; }
+        .player-action-btn.active .pa-svg text { fill: #fff; }
+        .pa-count { font-size: 14px; min-width: 1ch; font-variant-numeric: tabular-nums; }
+
+        /* 长按一键三连：三个按钮同时出一圈进度环（1s 走完一圈） */
+        .pa-ring {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 42px;
+            height: 42px;
+            margin: -21px 0 0 -21px;
+            pointer-events: none;
+            transform: rotate(-90deg);
+            overflow: visible;
+        }
+        .pa-ring circle {
+            fill: none;
+            stroke: #00AEEC;
+            stroke-width: 2.4;
+            stroke-linecap: round;
+            stroke-dasharray: 113.1;
+            stroke-dashoffset: 113.1;
+            opacity: 0;
+        }
+        .player-actions.pa-pressing .player-action-btn { color: #00AEEC; }
+        .player-actions.pa-pressing .pa-ring circle {
+            opacity: 1;
+            stroke-dashoffset: 0;
+            transition: stroke-dashoffset 1s linear, opacity .1s ease;
+        }
+        .player-actions.pa-done .pa-ring circle {
+            opacity: 0;
+            stroke-dashoffset: 0;
+            transition: opacity .5s ease;
+        }
+        .player-actions.pa-done .pa-icon { animation: paPop .45s ease; }
+        @keyframes paPop { 0% { transform: scale(1); } 45% { transform: scale(1.25); } 100% { transform: scale(1); } }
 
         /* UP 主关注组件（stream 风格） */
         .up-follow {
@@ -1435,24 +1488,33 @@
         <!-- 解析栏：左侧点赞/投币/收藏 + UP 主关注 + 右侧 BV/AV 号输入 -->
         <div class="parse-row">
             <div class="player-actions" id="playerActions">
-                <button class="player-action-btn like" id="likeActionBtn" onclick="doLike()" title="点赞">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3Zm0 0l4.5-8a2 2 0 0 1 3.5 1.5V9h4.2a2 2 0 0 1 1.97 2.3l-1.1 7A2 2 0 0 1 18.1 20H10a3 3 0 0 1-3-3v-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-                    </svg>
-                    <span id="likeCount">-</span>
+                <button class="player-action-btn like" id="likeActionBtn" type="button" title="点赞（长按一键三连）">
+                    <span class="pa-icon">
+                        <svg class="pa-ring" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18"/></svg>
+                        <svg class="pa-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path class="pa-fill" d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3Zm0 0l4.5-8a2 2 0 0 1 3.5 1.5V9h4.2a2 2 0 0 1 1.97 2.3l-1.1 7A2 2 0 0 1 18.1 20H10a3 3 0 0 1-3-3v-6Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                    <span class="pa-count" id="likeCount">-</span>
                 </button>
-                <button class="player-action-btn coin" id="coinActionBtn" onclick="doCoin()" title="投币">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
-                        <text x="12" y="16" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor">币</text>
-                    </svg>
-                    <span id="coinCount">-</span>
+                <button class="player-action-btn coin" id="coinActionBtn" type="button" onclick="doCoin()" title="投币">
+                    <span class="pa-icon">
+                        <svg class="pa-ring" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18"/></svg>
+                        <svg class="pa-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <circle class="pa-fill" cx="12" cy="12" r="9.2" stroke="currentColor" stroke-width="1.7"/>
+                            <text x="12" y="16" text-anchor="middle" font-size="11" font-weight="700">币</text>
+                        </svg>
+                    </span>
+                    <span class="pa-count" id="coinCount">-</span>
                 </button>
-                <button class="player-action-btn fav" id="favActionBtn" onclick="doFavorite()" title="收藏">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7L12 3.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-                    </svg>
-                    <span id="favCount">-</span>
+                <button class="player-action-btn fav" id="favActionBtn" type="button" onclick="doFavorite()" title="收藏">
+                    <span class="pa-icon">
+                        <svg class="pa-ring" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18"/></svg>
+                        <svg class="pa-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path class="pa-fill" d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7L12 3.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                    <span class="pa-count" id="favCount">-</span>
                 </button>
             </div>
 
@@ -2122,6 +2184,140 @@
                 alert('投币失败：' + (err.message || '网络异常'));
             }
         }
+
+        /* ----------------------------- 长按点赞：一键三连 ----------------------------- */
+        // 按住点赞按钮 1 秒：三个按钮同时出现进度环；走满后依次 点赞 → 投币补满 2 个 → 收藏到默认收藏夹。
+        // 中途松手 = 取消三连；快速点按 = 普通点赞/取消赞。已点赞/已投币/已收藏的项会自动跳过，不会重复消耗。
+        const TRIPLE_HOLD_MS = 1000;
+
+        async function doTriple() {
+            if (!currentAid) return;
+            if (!_getCreds().SESSDATA) {
+                showToast('请先登录 B 站账号');
+                setTimeout(() => location.href = '/account', 1200);
+                return;
+            }
+            const done = [];
+            const failed = [];
+            const needLogin = (d) => d && (d.code === -101 || d.code === -111);
+            const post = async (url, payload) => {
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const data = await res.json().catch(() => ({}));
+                return { ok: res.ok, data };
+            };
+
+            // 1) 点赞
+            if (!videoRelation.liked) {
+                try {
+                    const r = await post('/api/video/like', { aid: currentAid, bvid: currentBvid, like: true });
+                    if (r.ok) {
+                        videoRelation.liked = true;
+                        videoStat.like = (videoStat.like || 0) + 1;
+                        done.push('点赞');
+                    } else {
+                        if (needLogin(r.data)) { setTimeout(() => location.href = '/account', 1500); }
+                        failed.push('点赞：' + (r.data.error || '失败'));
+                    }
+                } catch (e) { failed.push('点赞：网络异常'); }
+            }
+
+            // 2) 投币：补满到 2 个（还没投过 → 一次投 2 个；已投 1 个 → 补投 1 个；已投满 → 跳过）
+            const coinToAdd = Math.max(0, 2 - (videoRelation.coin || 0));
+            if (coinToAdd > 0) {
+                try {
+                    const r = await post('/api/video/coin', {
+                        aid: currentAid, bvid: currentBvid, multiply: coinToAdd, select_like: false,
+                    });
+                    if (r.ok) {
+                        videoRelation.coin = (videoRelation.coin || 0) + coinToAdd;
+                        videoStat.coin = (videoStat.coin || 0) + coinToAdd;
+                        done.push('投币×' + coinToAdd);
+                    } else {
+                        failed.push('投币：' + (r.data.error || '失败'));
+                    }
+                } catch (e) { failed.push('投币：网络异常'); }
+            }
+
+            // 3) 收藏（放进第一个收藏夹，也就是默认收藏夹）
+            if (!videoRelation.favorite) {
+                try {
+                    const fr = await fetch('/api/video/fav/folders?aid=' + currentAid);
+                    const fd = await fr.json();
+                    if (!fr.ok) throw new Error(fd.error || '获取收藏夹失败');
+                    const target = (fd.list || []).find(f => !f.checked) || (fd.list || [])[0];
+                    if (!target) throw new Error('还没有收藏夹');
+                    if (target.checked) {
+                        videoRelation.favorite = true;
+                    } else {
+                        const r = await post('/api/video/fav/toggle', {
+                            aid: currentAid, folder_id: target.id, checked: true,
+                        });
+                        if (!r.ok) throw new Error(r.data.error || '失败');
+                        videoRelation.favorite = true;
+                        videoStat.favorite = (videoStat.favorite || 0) + 1;
+                        done.push('收藏');
+                    }
+                } catch (e) { failed.push('收藏：' + (e.message || '失败')); }
+            }
+
+            renderPlayerActions();
+            if (!failed.length) {
+                showToast(done.length ? '一键三连成功！' : '已经三连过啦');
+            } else {
+                showToast((done.length ? '已' + done.join('、') + '；' : '') + failed.join('；'));
+            }
+        }
+
+        (function initTripleLongPress() {
+            const box = document.getElementById('playerActions');
+            const likeBtn = document.getElementById('likeActionBtn');
+            if (!box || !likeBtn) return;
+            let timer = null;
+            let fired = false;
+            let pressing = false;
+
+            const cancel = () => {
+                clearTimeout(timer);
+                timer = null;
+                pressing = false;
+                box.classList.remove('pa-pressing');
+            };
+
+            likeBtn.addEventListener('pointerdown', (e) => {
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
+                if (!currentAid) return;
+                pressing = true;
+                fired = false;
+                box.classList.remove('pa-done');
+                box.classList.add('pa-pressing');
+                timer = setTimeout(() => {
+                    timer = null;
+                    fired = true;
+                    pressing = false;
+                    box.classList.remove('pa-pressing');
+                    box.classList.add('pa-done');
+                    setTimeout(() => box.classList.remove('pa-done'), 600);
+                    doTriple();
+                }, TRIPLE_HOLD_MS);
+            });
+
+            likeBtn.addEventListener('pointerup', () => {
+                if (!pressing) return;          // 已触发三连 / 已取消
+                const wasShortPress = timer !== null;
+                cancel();
+                if (wasShortPress) doLike();    // 没按够 1 秒：当作普通点击
+            });
+            likeBtn.addEventListener('pointerleave', cancel);
+            likeBtn.addEventListener('pointercancel', cancel);
+            // 长按在手机上会弹出系统菜单，屏蔽掉
+            likeBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+            // 键盘回车/空格触发的 click（detail === 0）保持可用；鼠标/触摸的 click 已由 pointer 事件处理
+            likeBtn.addEventListener('click', (e) => { if (e.detail === 0) doLike(); });
+        })();
 
         async function doFavorite() {
             if (!currentAid) { alert('视频还没加载好'); return; }
