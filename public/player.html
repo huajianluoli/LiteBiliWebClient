@@ -489,7 +489,7 @@
             position: relative;
             display: inline-flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
             padding: 0;
             margin: 0;
             border: none;
@@ -519,10 +519,6 @@
             flex-shrink: 0;
         }
         .pa-svg { display: block; width: 28px; height: 28px; overflow: visible; }
-        .pa-svg .pa-fill { transition: fill .15s ease; }
-        .pa-svg text { fill: currentColor; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
-        .player-action-btn.active .pa-svg .pa-fill { fill: currentColor; }
-        .player-action-btn.active .pa-svg text { fill: #fff; }
         .pa-count { font-size: 14px; min-width: 1ch; font-variant-numeric: tabular-nums; }
 
         /* 长按一键三连：三个按钮同时出一圈进度环（1s 走完一圈） */
@@ -557,7 +553,7 @@
             stroke-dashoffset: 0;
             transition: opacity .5s ease;
         }
-        .player-actions.pa-done .pa-icon { animation: paPop .45s ease; }
+        .player-actions.pa-done .pa-svg { animation: paPop .45s ease; }
         @keyframes paPop { 0% { transform: scale(1); } 45% { transform: scale(1.25); } 100% { transform: scale(1); } }
 
         /* UP 主关注组件（stream 风格） */
@@ -1275,6 +1271,64 @@
 :root[data-theme="light"] .comment-composer button { background: #00A1D6; color: #fff; border: 1px solid #00A1D6; }
 :root[data-theme="light"] .search-box button:hover,
 :root[data-theme="light"] .comment-composer button:hover { background: #0091c2; color: #fff; }
+        /* ---------------- 投币弹窗 ---------------- */
+        .coin-mask {
+            position: fixed; inset: 0; z-index: 9999;
+            background: rgba(0,0,0,.55);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .coin-dialog {
+            position: relative;
+            width: 92%; max-width: 460px; max-height: 92vh;
+            display: flex; flex-direction: column;
+            background: var(--g0a0a0a, #fff); color: var(--gffffff, #000);
+            border-radius: 12px; overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,.4);
+        }
+        .coin-body { padding: 22px 22px 14px; overflow-y: auto; }
+        .coin-close {
+            position: absolute; top: 10px; right: 12px;
+            width: 32px; height: 32px; padding: 0; border: none; background: none;
+            color: inherit; font-size: 24px; line-height: 1; cursor: pointer; opacity: .7;
+        }
+        .coin-close:hover { background: none; color: inherit; opacity: 1; }
+        .coin-title { text-align: center; font-size: 17px; font-weight: 600; margin: 4px 0 18px; }
+        .coin-num { display: inline-block; min-width: 1ch; margin: 0 4px; font-size: 32px; line-height: 1; color: #FB7299; vertical-align: -3px; }
+        .coin-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .coin-card {
+            position: relative; height: 240px; padding: 0; border-radius: 6px;
+            display: flex; align-items: flex-end; justify-content: center;
+            background: transparent; border: 2px dashed var(--g555555, #999); color: var(--g999999, #666);
+            cursor: pointer; font-size: 14px; font-weight: 400;
+            transition: border-color .15s, color .15s;
+        }
+        .coin-card:hover { background: transparent; color: var(--g999999, #666); }
+        .coin-card.selected { border: 2px solid #FB7299; color: #FB7299; }
+        .coin-card.disabled { opacity: .35; cursor: not-allowed; }
+        .coin-card-label { position: absolute; left: 14px; top: 12px; }
+        .coin-sprite {
+            --fh: 180px; --fw: calc(var(--fh) * 187 / 300);
+            width: var(--fw); height: var(--fh); margin-bottom: 14px;
+            background-repeat: no-repeat; background-size: auto 100%; background-position: 0 0;
+            animation: coinFrames 1.2s steps(24) infinite;
+            pointer-events: none;
+        }
+        /* 4488×300 的横条图，24 帧，每帧 187×300：位移 24 个帧宽、分 24 步 = 逐帧播放 */
+        @keyframes coinFrames { from { background-position-x: 0; } to { background-position-x: calc(var(--fw) * -24); } }
+        .coin-like { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: 14px; cursor: pointer; user-select: none; }
+        .coin-like { justify-content: flex-start; }
+        .coin-like input { flex: 0 0 18px; width: 18px; min-width: 18px; height: 18px; padding: 0; margin: 0; accent-color: #FB7299; }
+        .coin-footer { padding: 12px 20px 14px; border-top: 1px solid var(--g222222, #e3e5e7); }
+        .coin-ok {
+            width: 100%; padding: 11px; border: none; border-radius: 6px;
+            background: #FB7299; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+        }
+        .coin-ok:hover { background: #FB7299; color: #fff; filter: brightness(.94); }
+        .coin-ok:disabled { opacity: .6; cursor: default; }
+        .coin-exp { margin-top: 10px; text-align: center; font-size: 12px; color: var(--g777777, #888); }
+        @media (max-width: 480px) { .coin-card { height: 210px; } .coin-sprite { --fh: 150px; } }
+        @media (prefers-reduced-motion: reduce) { .coin-sprite { animation-duration: 2.4s; } }
+
 </style>
     <script>
         // Artplayer 多源加载：优先国内可访问的镜像，最终兜底到本地 /vendor/
@@ -1491,28 +1545,21 @@
                 <button class="player-action-btn like" id="likeActionBtn" type="button" title="点赞（长按一键三连）">
                     <span class="pa-icon">
                         <svg class="pa-ring" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18"/></svg>
-                        <svg class="pa-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path class="pa-fill" d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3Zm0 0l4.5-8a2 2 0 0 1 3.5 1.5V9h4.2a2 2 0 0 1 1.97 2.3l-1.1 7A2 2 0 0 1 18.1 20H10a3 3 0 0 1-3-3v-6Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-                        </svg>
+                        <svg class="pa-svg" width="28" height="28" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M9.77234 30.8573V11.7471H7.54573C5.50932 11.7471 3.85742 13.3931 3.85742 15.425V27.1794C3.85742 29.2112 5.50932 30.8573 7.54573 30.8573H9.77234ZM11.9902 30.8573V11.7054C14.9897 10.627 16.6942 7.8853 17.1055 3.33591C17.2666 1.55463 18.9633 0.814421 20.5803 1.59505C22.1847 2.36964 23.243 4.32583 23.243 6.93947C23.243 8.50265 23.0478 10.1054 22.6582 11.7471H29.7324C31.7739 11.7471 33.4289 13.402 33.4289 15.4435C33.4289 15.7416 33.3928 16.0386 33.3215 16.328L30.9883 25.7957C30.2558 28.7683 27.5894 30.8573 24.528 30.8573H11.9911H11.9902Z" fill="currentColor"/></svg>
                     </span>
                     <span class="pa-count" id="likeCount">-</span>
                 </button>
                 <button class="player-action-btn coin" id="coinActionBtn" type="button" onclick="doCoin()" title="投币">
                     <span class="pa-icon">
                         <svg class="pa-ring" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18"/></svg>
-                        <svg class="pa-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <circle class="pa-fill" cx="12" cy="12" r="9.2" stroke="currentColor" stroke-width="1.7"/>
-                            <text x="12" y="16" text-anchor="middle" font-size="11" font-weight="700">币</text>
-                        </svg>
+                        <svg class="pa-svg" width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M14.045 25.5454C7.69377 25.5454 2.54504 20.3967 2.54504 14.0454C2.54504 7.69413 7.69377 2.54541 14.045 2.54541C20.3963 2.54541 25.545 7.69413 25.545 14.0454C25.545 17.0954 24.3334 20.0205 22.1768 22.1771C20.0201 24.3338 17.095 25.5454 14.045 25.5454ZM9.66202 6.81624H18.2761C18.825 6.81624 19.27 7.22183 19.27 7.72216C19.27 8.22248 18.825 8.62807 18.2761 8.62807H14.95V10.2903C17.989 10.4444 20.3766 12.9487 20.3855 15.9916V17.1995C20.3854 17.6997 19.9799 18.1052 19.4796 18.1052C18.9793 18.1052 18.5738 17.6997 18.5737 17.1995V15.9916C18.5667 13.9478 16.9882 12.2535 14.95 12.1022V20.5574C14.95 21.0577 14.5444 21.4633 14.0441 21.4633C13.5437 21.4633 13.1382 21.0577 13.1382 20.5574V12.1022C11.1 12.2535 9.52148 13.9478 9.51448 15.9916V17.1995C9.5144 17.6997 9.10883 18.1052 8.60856 18.1052C8.1083 18.1052 7.70273 17.6997 7.70265 17.1995V15.9916C7.71158 12.9487 10.0992 10.4444 13.1382 10.2903V8.62807H9.66202C9.11309 8.62807 8.66809 8.22248 8.66809 7.72216C8.66809 7.22183 9.11309 6.81624 9.66202 6.81624Z" fill="currentColor"/></svg>
                     </span>
                     <span class="pa-count" id="coinCount">-</span>
                 </button>
                 <button class="player-action-btn fav" id="favActionBtn" type="button" onclick="doFavorite()" title="收藏">
                     <span class="pa-icon">
                         <svg class="pa-ring" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18"/></svg>
-                        <svg class="pa-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path class="pa-fill" d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7L12 3.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-                        </svg>
+                        <svg class="pa-svg" width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M19.8071 9.26152C18.7438 9.09915 17.7624 8.36846 17.3534 7.39421L15.4723 3.4972C14.8998 2.1982 13.1004 2.1982 12.4461 3.4972L10.6468 7.39421C10.1561 8.36846 9.25639 9.09915 8.19315 9.26152L3.94016 9.91102C2.63155 10.0734 2.05904 11.6972 3.04049 12.6714L6.23023 15.9189C6.96632 16.6496 7.29348 17.705 7.1299 18.7605L6.39381 23.307C6.14844 24.6872 7.62063 25.6614 8.84745 25.0119L12.4461 23.0634C13.4276 22.4951 14.6544 22.4951 15.6359 23.0634L19.2345 25.0119C20.4614 25.6614 21.8518 24.6872 21.6882 23.307L20.8703 18.7605C20.7051 17.705 21.0339 16.6496 21.77 15.9189L24.9597 12.6714C25.9412 11.6972 25.3687 10.0734 24.06 9.91102L19.8071 9.26152Z" fill="currentColor"/></svg>
                     </span>
                     <span class="pa-count" id="favCount">-</span>
                 </button>
@@ -2139,50 +2186,92 @@
         }
 
         async function doCoin() {
-            if (!currentAid) return;
-            if (videoRelation.coin >= 2) {
-                alert('已经投过 2 个硬币啦，每人最多 2 个~');
-                return;
-            }
+            if (!currentAid) { showToast('视频还没加载好'); return; }
+            const have = videoRelation.coin || 0;
+            if (have >= 2) { showToast('已经投过 2 个硬币啦，每人最多 2 个~'); return; }
             if (!_getCreds().SESSDATA) {
-                alert('请先登录 B 站账号');
-                location.href = '/account';
+                showToast('请先登录 B 站账号');
+                setTimeout(() => location.href = '/account', 1200);
                 return;
             }
+            openCoinModal(2 - have);
+        }
 
-            const before = videoRelation.coin;
-            try {
-                const res = await fetch('/api/video/coin', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        aid: currentAid,
-                        bvid: currentBvid,
-                        multiply: 1,
-                        select_like: videoRelation.liked,
-                    }),
-                });
-                const data = await res.json();
-                if (!res.ok) {
-                    alert(data.error || '投币失败');
-                    if (data.code === -101 || data.code === -111) {
-                        setTimeout(() => location.href = '/account', 1500);
+        // ---- 投币弹窗：选 1 / 2 枚硬币（人物是 24 帧雪碧图循环播放），可勾选"同时点赞" ----
+        function openCoinModal(maxCoins) {
+            const old = document.getElementById('coinModal');
+            if (old) old.remove();
+            let selected = 1;
+            const canLike = !videoRelation.liked;
+            const mask = document.createElement('div');
+            mask.id = 'coinModal';
+            mask.className = 'coin-mask';
+            const card = (n, img) => `
+                <button type="button" class="coin-card${n === 1 ? ' selected' : ''}${n > maxCoins ? ' disabled' : ''}" data-n="${n}" ${n > maxCoins ? 'disabled title="每人最多投 2 个硬币"' : ''}>
+                    <span class="coin-card-label">${n} 硬币</span>
+                    <span class="coin-sprite" style="background-image:url(/images/${img})"></span>
+                </button>`;
+            mask.innerHTML = `
+              <div class="coin-dialog" role="dialog" aria-modal="true">
+                <button type="button" class="coin-close" id="coinModalClose" aria-label="关闭">&times;</button>
+                <div class="coin-body">
+                  <div class="coin-title">给UP主投上<span class="coin-num" id="coinModalNum">1</span>枚硬币</div>
+                  <div class="coin-cards">${card(1, 'coin_1.png')}${card(2, 'coin_2.png')}</div>
+                  ${canLike ? '<label class="coin-like"><input type="checkbox" id="coinModalLike" checked>同时点赞内容</label>' : ''}
+                </div>
+                <div class="coin-footer">
+                  <button type="button" class="coin-ok" id="coinModalOk">确定</button>
+                  <div class="coin-exp" id="coinModalExp">经验值+10</div>
+                </div>
+              </div>`;
+            document.body.appendChild(mask);
+
+            const close = () => { mask.remove(); document.removeEventListener('keydown', onKey); };
+            const onKey = (e) => { if (e.key === 'Escape') close(); };
+            document.addEventListener('keydown', onKey);
+            mask.addEventListener('click', (e) => { if (e.target === mask) close(); });
+            document.getElementById('coinModalClose').onclick = close;
+
+            mask.querySelectorAll('.coin-card').forEach(c => {
+                c.onclick = () => {
+                    if (c.disabled) return;
+                    selected = Number(c.dataset.n);
+                    mask.querySelectorAll('.coin-card').forEach(x => x.classList.toggle('selected', x === c));
+                    document.getElementById('coinModalNum').textContent = selected;
+                };
+            });
+
+            document.getElementById('coinModalOk').onclick = async () => {
+                const okBtn = document.getElementById('coinModalOk');
+                okBtn.disabled = true; okBtn.textContent = '投币中…';
+                const likeAlso = !!(document.getElementById('coinModalLike') || {}).checked;
+                try {
+                    const res = await fetch('/api/video/coin', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ aid: currentAid, bvid: currentBvid, multiply: selected, select_like: likeAlso }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        showToast(data.error || '投币失败');
+                        if (data.code === -101 || data.code === -111) setTimeout(() => location.href = '/account', 1500);
+                        okBtn.disabled = false; okBtn.textContent = '确定';
+                        return;
                     }
-                    return;
+                    videoRelation.coin = (videoRelation.coin || 0) + selected;
+                    videoStat.coin = (videoStat.coin || 0) + selected;
+                    if (likeAlso && !videoRelation.liked) {
+                        videoRelation.liked = true;
+                        videoStat.like = (videoStat.like || 0) + 1;
+                    }
+                    renderPlayerActions();
+                    close();
+                    showToast(`投币成功 ×${selected}${likeAlso ? '，已同时点赞' : ''}`);
+                } catch (err) {
+                    showToast('投币失败：' + (err.message || '网络异常'));
+                    okBtn.disabled = false; okBtn.textContent = '确定';
                 }
-
-                videoRelation.coin = before + 1;
-                videoStat.coin = (videoStat.coin || 0) + 1;
-                renderPlayerActions();
-
-                if (videoRelation.coin === 1) {
-                    alert('已投 1 个硬币，再点一次可投第 2 个~');
-                } else if (videoRelation.coin === 2) {
-                    alert('已投满 2 个硬币，感谢支持！');
-                }
-            } catch (err) {
-                alert('投币失败：' + (err.message || '网络异常'));
-            }
+            };
         }
 
         /* ----------------------------- 长按点赞：一键三连 ----------------------------- */
@@ -2280,11 +2369,32 @@
             let fired = false;
             let pressing = false;
 
+            // 按住期间：每个按钮的图标和数字随机小幅抖动（上下左右），圆环轨道本身不动
+            const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+            let shakeTimer = null;
+            const shakeTargets = () => box.querySelectorAll('.pa-svg, .pa-count');
+            const startShake = () => {
+                if (reduceMotion) return;
+                stopShake();
+                shakeTimer = setInterval(() => {
+                    shakeTargets().forEach(el => {
+                        const r = () => ((Math.random() * 2 - 1) * 2).toFixed(2);
+                        el.style.transform = `translate(${r()}px, ${r()}px)`;
+                    });
+                }, 45);
+            };
+            const stopShake = () => {
+                clearInterval(shakeTimer);
+                shakeTimer = null;
+                shakeTargets().forEach(el => { el.style.transform = ''; });
+            };
+
             const cancel = () => {
                 clearTimeout(timer);
                 timer = null;
                 pressing = false;
                 box.classList.remove('pa-pressing');
+                stopShake();
             };
 
             likeBtn.addEventListener('pointerdown', (e) => {
@@ -2294,11 +2404,13 @@
                 fired = false;
                 box.classList.remove('pa-done');
                 box.classList.add('pa-pressing');
+                startShake();
                 timer = setTimeout(() => {
                     timer = null;
                     fired = true;
                     pressing = false;
                     box.classList.remove('pa-pressing');
+                    stopShake();
                     box.classList.add('pa-done');
                     setTimeout(() => box.classList.remove('pa-done'), 600);
                     doTriple();
