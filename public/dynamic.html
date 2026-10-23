@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<script src="/auth.js"></script>
+<script>(function(){try{var isP=/\/(player|stream)/.test(location.pathname);var k=isP?'bili_player_theme':'bili_theme';var d=isP?'dark':'light';var t=localStorage.getItem(k)||d;if(t!=='dark'&&t!=='light')t=d;document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>动态 - B站视频搜索器</title>
+<style>
+  :root {
+    --pink: #FB7299;
+    --blue: #00A1D6;
+    --bg: #F1F2F3;
+    --card: #FFFFFF;
+    --text: #18191C;
+    --text-2: #61666D;
+    --text-3: #9499A0;
+    --border: #E3E5E7;
+    --header-h: 64px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif; }
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; }
+
+  /* ============ 顶栏（同其它页面，无搜索框） ============ */
+  .site-header { position: sticky; top: 0; z-index: 100; height: var(--header-h); background: var(--card); color: var(--text); box-shadow: 0 1px 8px rgba(0,0,0,.06); }
+  .header-inner { max-width: 1400px; height: 100%; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; gap: 20px; }
+  .logo { display: flex; align-items: center; flex-shrink: 0; user-select: none; color: var(--pink); }
+  .logo-svg { display: block; height: 28px; width: auto; }
+  .top-nav { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .top-nav-item { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: none; background: none; border-radius: 8px; color: inherit; font-size: 14px; font-weight: 500; cursor: pointer; transition: background .15s ease; opacity: .9; }
+  .top-nav-item:hover { background: rgba(0,0,0,.05); opacity: 1; }
+  .user-actions { margin-left: auto; display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .user-icon { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 0; border: none; background: none; border-radius: 50%; color: inherit; cursor: pointer; transition: background .15s ease; position: relative; }
+  .user-icon:hover { background: rgba(0,0,0,.05); }
+  .user-icon.active { color: var(--pink); }
+  .user-icon svg { display: block; }
+  .login-btn { height: 34px; padding: 0 16px; border-radius: 17px; background: var(--pink); color: #fff; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+  .avatar-btn { width: 34px; height: 34px; border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; background: var(--bg); color: var(--text-2); font-weight: 600; font-size: 14px; }
+  .avatar-btn img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  /* ============ 动态流 ============ */
+  .dy-wrap { max-width: 740px; margin: 0 auto; padding: 18px 16px 80px; }
+  .dy-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .dy-tab { padding: 7px 18px; border: 1px solid var(--border); border-radius: 18px; background: var(--card); color: var(--text-2); font-size: 14px; cursor: pointer; transition: all .15s; }
+  .dy-tab:hover { color: var(--pink); border-color: var(--pink); }
+  .dy-tab.active { background: var(--pink); border-color: var(--pink); color: #fff; font-weight: 600; }
+  .dy-refresh { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; padding: 7px 14px; border: 1px solid var(--border); border-radius: 18px; background: var(--card); color: var(--text-2); font-size: 13px; cursor: pointer; }
+  .dy-refresh:hover { color: var(--pink); border-color: var(--pink); }
+  .dy-refresh.spin svg { animation: dySpin .8s linear infinite; }
+  @keyframes dySpin { to { transform: rotate(360deg); } }
+
+  .dy-newpill { display: none; position: sticky; top: calc(var(--header-h) + 8px); z-index: 20; margin: 0 auto 12px; width: fit-content; padding: 8px 18px; border: none; border-radius: 18px; background: var(--pink); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 3px 12px rgba(251,114,153,.45); }
+  .dy-newpill.show { display: block; }
+
+  .dy-item { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px 6px; margin-bottom: 12px; }
+  .dy-head { display: flex; align-items: center; gap: 12px; }
+  .dy-avatar { width: 44px; height: 44px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: var(--bg); }
+  .dy-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .dy-author { min-width: 0; flex: 1; }
+  .dy-name { font-size: 15px; font-weight: 600; color: var(--text); }
+  .dy-name:hover { color: var(--pink); }
+  .dy-sub { margin-top: 3px; font-size: 12px; color: var(--text-3); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .dy-tag { padding: 0 6px; border-radius: 3px; font-size: 11px; line-height: 17px; background: var(--bg); color: var(--text-2); }
+  .dy-tag.pink { background: rgba(251,114,153,.14); color: var(--pink); }
+
+  .dy-body { margin-top: 12px; padding-left: 56px; }
+  .dy-title { font-size: 16px; font-weight: 700; margin: 0 0 6px; line-height: 1.5; word-break: break-all; }
+  .dy-text { font-size: 15px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+  .dy-text.clamp { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+  .dy-text a { color: var(--blue); }
+  .dy-text a:hover { text-decoration: underline; }
+  .dy-emote { height: 22px; width: auto; vertical-align: -5px; margin: 0 1px; }
+  .dy-more { margin-top: 4px; padding: 0; border: none; background: none; color: var(--blue); font-size: 13px; cursor: pointer; }
+  .dy-fold { margin-bottom: 8px; padding: 6px 10px; border-radius: 6px; background: var(--bg); color: var(--text-3); font-size: 12px; }
+
+  /* 图片九宫格 */
+  .dy-images { margin-top: 10px; display: grid; gap: 4px; max-width: 480px; }
+  .dy-images.count-1 { grid-template-columns: 1fr; max-width: 340px; }
+  .dy-images.count-2, .dy-images.count-4 { grid-template-columns: 1fr 1fr; max-width: 340px; }
+  .dy-images.count-3, .dy-images.count-5, .dy-images.count-6, .dy-images.count-7, .dy-images.count-8, .dy-images.count-9 { grid-template-columns: repeat(3, 1fr); }
+  .dy-img { position: relative; padding: 0; border: none; background: var(--bg); border-radius: 6px; overflow: hidden; cursor: zoom-in; aspect-ratio: 1; display: block; }
+  .dy-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .dy-images.count-1 .dy-img { aspect-ratio: auto; max-height: 420px; }
+  .dy-images.count-1 .dy-img img { height: auto; max-height: 420px; object-fit: contain; }
+  .dy-img-more { margin-top: 6px; font-size: 12px; color: var(--text-3); }
+
+  /* 视频 / 直播 / 专栏 / 通用 卡片 */
+  .dy-card { margin-top: 10px; display: flex; gap: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); transition: border-color .15s; }
+  .dy-card:hover { border-color: var(--pink); }
+  .dy-card-cover { position: relative; flex-shrink: 0; width: 180px; aspect-ratio: 16/10; border-radius: 6px; overflow: hidden; background: var(--border); }
+  .dy-card-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .dy-card-dur { position: absolute; right: 6px; bottom: 6px; padding: 1px 6px; border-radius: 4px; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; }
+  .dy-card-live { position: absolute; left: 6px; top: 6px; padding: 1px 7px; border-radius: 4px; background: var(--pink); color: #fff; font-size: 11px; font-weight: 600; }
+  .dy-card-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+  .dy-card-title { font-size: 14px; font-weight: 600; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .dy-card-brief { font-size: 12px; color: var(--text-2); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .dy-card-stats { margin-top: auto; font-size: 12px; color: var(--text-3); display: flex; gap: 12px; }
+  .dy-badge { align-self: flex-start; padding: 0 6px; border-radius: 3px; font-size: 11px; line-height: 17px; background: rgba(251,114,153,.14); color: var(--pink); }
+  .dy-none { margin-top: 10px; padding: 14px; border-radius: 8px; background: var(--bg); color: var(--text-3); font-size: 13px; text-align: center; }
+
+  /* 转发 */
+  .dy-forward { margin-top: 10px; padding: 12px 14px 14px; border-radius: 8px; background: var(--bg); }
+  .dy-forward-author { font-size: 14px; margin-bottom: 6px; }
+  .dy-forward-author a { color: var(--blue); font-weight: 600; }
+  .dy-forward .dy-card { background: var(--card); }
+  .dy-forward .dy-images { max-width: 420px; }
+
+  /* 底部统计 */
+  .dy-foot { margin: 12px 0 0 56px; padding: 6px 0 8px; display: flex; align-items: center; gap: 4px; border-top: 1px solid var(--bg); }
+  .dy-stat { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px 6px 0; margin-right: 12px; border: none; background: none; color: var(--text-3); font-size: 13px; cursor: pointer; }
+  .dy-stat svg { width: 19px; height: 19px; display: block; }
+  .dy-stat:hover { color: var(--pink); }
+  .dy-stat.active { color: var(--pink); }
+  .dy-stat.active svg path { fill: currentColor; }
+  .dy-stat.busy { opacity: .5; pointer-events: none; }
+
+  .dy-state { text-align: center; color: var(--text-3); font-size: 13px; padding: 26px 0; }
+  .dy-state .btn { margin-top: 10px; padding: 7px 22px; border: none; border-radius: 16px; background: var(--pink); color: #fff; font-size: 13px; cursor: pointer; }
+  .dy-empty { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 60px 20px; text-align: center; color: var(--text-3); font-size: 14px; }
+  .dy-login { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 60px 20px; text-align: center; }
+  .dy-login h2 { margin: 0 0 8px; font-size: 18px; }
+  .dy-login p { margin: 0 0 18px; color: var(--text-2); font-size: 13px; }
+  .dy-login a { display: inline-block; padding: 9px 26px; border-radius: 18px; background: var(--pink); color: #fff; font-size: 14px; font-weight: 600; }
+
+  /* 骨架屏 */
+  .sk { background: linear-gradient(90deg, var(--bg) 25%, var(--border) 37%, var(--bg) 63%); background-size: 400% 100%; animation: skShine 1.4s ease infinite; border-radius: 6px; }
+  @keyframes skShine { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+  .sk-item { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px 18px; margin-bottom: 12px; }
+  .sk-row { display: flex; gap: 12px; align-items: center; }
+  .sk-avatar { width: 44px; height: 44px; border-radius: 50%; }
+
+  /* 图片灯箱 */
+  .dy-lb { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.88); align-items: center; justify-content: center; }
+  .dy-lb.show { display: flex; }
+  .dy-lb img { max-width: 92vw; max-height: 88vh; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+  .dy-lb-btn { position: absolute; width: 44px; height: 44px; border: none; border-radius: 50%; background: rgba(255,255,255,.14); color: #fff; font-size: 26px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+  .dy-lb-btn:hover { background: rgba(255,255,255,.28); }
+  .dy-lb-prev { left: 18px; top: 50%; transform: translateY(-50%); }
+  .dy-lb-next { right: 18px; top: 50%; transform: translateY(-50%); }
+  .dy-lb-close { right: 18px; top: 18px; }
+  .dy-lb-count { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); padding: 3px 12px; border-radius: 12px; background: rgba(0,0,0,.5); color: #fff; font-size: 13px; }
+  .dy-lb.single .dy-lb-prev, .dy-lb.single .dy-lb-next, .dy-lb.single .dy-lb-count { display: none; }
+
+  .bvid-toast { position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%) translateY(20px); background: rgba(24,25,28,.9); color: #fff; font-size: 14px; padding: 10px 18px; border-radius: 8px; z-index: 1200; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; white-space: nowrap; }
+  .bvid-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (max-width: 640px) {
+    :root { --header-h: 56px; }
+    .header-inner { padding: 0 14px; gap: 10px; }
+    .logo-svg { height: 24px; }
+    .user-actions .user-icon:not(.always-show):not(.active) { display: none; }
+    .dy-wrap { padding: 12px 10px 70px; }
+    .dy-item { padding: 14px 12px 4px; }
+    .dy-body { padding-left: 0; }
+    .dy-foot { margin-left: 0; }
+    .dy-card { flex-direction: column; }
+    .dy-card-cover { width: 100%; }
+  }
+
+  /* ============ 深色模式 ============ */
+  :root[data-theme="dark"] { --bg: #141414; --card: #1f2022; --text: #e6e6e8; --text-2: #9a9da3; --text-3: #6f7278; --border: #2c2d30; }
+  :root[data-theme="dark"] .top-nav-item:hover, :root[data-theme="dark"] .user-icon:hover { background: rgba(255,255,255,.08); }
+  :root[data-theme="dark"] .avatar-btn { background: var(--card); }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a class="logo" href="/search" title="首页" aria-label="bilibili">
+      <svg class="logo-svg" viewBox="0 0 52 24" xmlns="http://www.w3.org/2000/svg">
+        <path fill="currentColor" fill-rule="evenodd" d="M46.573 20.632c-.215 0-.398.017-.577-.004-.364-.042-.729-.034-1.093-.044-.236-.007-.229-.007-.248-.235-.059-.696-.123-1.392-.185-2.088-.054-.611-.105-1.223-.165-1.834-.054-.56-.12-1.117-.178-1.676-.057-.526-.109-1.052-.167-1.576-.074-.66-.15-1.32-.23-1.98-.07-.583-.14-1.168-.218-1.75-.122-.903-.248-1.805-.376-2.707a79.498 79.498 0 00-.474-2.873c-.03-.171-.026-.177.137-.205.679-.116 1.361-.215 2.052-.2.074.002.15.004.224.013.121.015.184.074.191.216.024.494.059.987.095 1.48.058.808.121 1.616.181 2.423.039.52.072 1.038.11 1.557.063.833.13 1.666.192 2.499.039.51.072 1.02.111 1.53.06.748.125 1.495.186 2.242.038.476.072.952.113 1.428.06.705.124 1.41.185 2.114.046.55.087 1.102.134 1.67zM20.291 3.468c.1 0 .25-.011.398.002.188.018.224.066.236.256.054.868.105 1.736.163 2.605.063.936.132 1.871.201 2.806.064.859.128 1.717.196 2.576.075.943.158 1.885.233 2.829.058.722.106 1.445.165 2.168.056.671.122 1.34.183 2.011.05.577.103 1.154.153 1.732.016.183.003.195-.194.19-.515-.013-1.027-.073-1.542-.059-.118.004-.152-.05-.172-.163-.043-.244-.036-.492-.062-.739-.07-.652-.111-1.307-.17-1.961-.054-.594-.119-1.187-.18-1.78-.054-.543-.107-1.085-.165-1.628-.058-.533-.119-1.067-.179-1.6-.055-.491-.11-.982-.169-1.473-.087-.719-.173-1.438-.268-2.156-.087-.659-.185-1.315-.278-1.973a77.866 77.866 0 00-.425-2.674 30.006 30.006 0 00-.114-.602c-.02-.101-.002-.16.113-.175.303-.041.605-.104.91-.134.304-.028.609-.085.967-.058zm21.565 8.668c.58 0 .594.004.687.527.115.646.195 1.297.271 1.948.08.694.161 1.387.235 2.082.06.559.11 1.12.166 1.678.06.586.122 1.17.183 1.755.033.33.065.661.102.991.011.096-.017.146-.111.157-.199.023-.395.05-.593.07-.362.04-.725.078-1.087.112-.188.017-.2.007-.235-.175-.318-1.646-.637-3.291-.952-4.939-.21-1.095-.414-2.19-.62-3.286-.028-.15-.053-.302-.077-.453-.014-.087.01-.143.108-.166.653-.153 1.313-.271 1.923-.301zm-24.373 0c.62 0 .618.002.714.567.148.873.253 1.752.347 2.633.091.856.192 1.71.282 2.565.06.586.108 1.172.165 1.756.04.416.089.831.133 1.246.005.051.008.102.011.154.01.203 0 .22-.195.24-.387.04-.776.074-1.163.112-.14.014-.28.035-.42.048-.185.017-.191.017-.227-.17-.13-.66-.257-1.32-.384-1.98-.306-1.588-.615-3.175-.92-4.763-.12-.636-.225-1.274-.344-1.91-.022-.116-.006-.17.114-.198.648-.152 1.3-.27 1.887-.3zm8.19 6.66v2.665c0 .025-.002.051.002.077.012.13-.035.186-.168.18-.175-.007-.348-.002-.523.002-.365.007-.73-.008-1.095.034-.201.024-.197.011-.217-.202-.06-.67-.125-1.341-.186-2.012-.056-.62-.107-1.24-.164-1.86-.058-.637-.124-1.273-.183-1.91-.04-.424-.076-.848-.111-1.273-.047-.553-.09-1.105-.139-1.658-.02-.233-.003-.266.227-.29a11.356 11.356 0 011.79-.056c.15.009.297.038.441.073.182.043.202.07.212.26.02.384.04.768.05 1.152.011.427.002.854.017 1.281.04 1.178.034 2.357.048 3.536zm24.325.12v2.524c0 .043-.001.085.001.129.009.11-.043.15-.147.149-.258-.002-.515 0-.772.003-.291.003-.581.002-.871.033-.192.022-.193.008-.21-.183l-.242-2.622c-.072-.807-.14-1.614-.213-2.421-.077-.833-.16-1.663-.234-2.495a84.78 84.78 0 01-.1-1.25c-.011-.182.008-.214.213-.23.355-.029.709-.077 1.067-.07.356.006.714-.014 1.068.054.3.058.316.075.333.397.052.947.036 1.896.07 2.843.034 1.008.01 2.016.037 3.14zm-8.747-11.36c.21.012.375.002.54.038.104.024.157.072.167.184.05.543.103 1.086.157 1.63.043.44.09.88.134 1.321l.004.026c.036.277.028.285-.242.3-.24.013-.48.034-.72.049-.157.01-.207.036-.233-.194-.09-.813-.194-1.623-.294-2.435a25.338 25.338 0 00-.092-.683c-.02-.13.03-.2.15-.21.158-.015.316-.019.429-.026zm-24.295.003c.162.01.329-.003.492.034.093.022.14.061.15.168.02.254.058.508.082.762.076.78.148 1.561.22 2.342.015.17.011.174-.147.185-.281.021-.563.042-.845.053-.164.008-.184-.012-.205-.18-.071-.575-.138-1.15-.207-1.726-.055-.474-.102-.948-.17-1.421-.018-.13.025-.167.129-.188.165-.034.331-.023.501-.029zm8.556 2.15v1.482c0 .222-.003.224-.224.221a6.928 6.928 0 01-.792-.041c-.17-.022-.174-.016-.179-.197-.017-.604-.035-1.209-.047-1.813-.009-.409-.014-.817-.038-1.226-.013-.21-.002-.213.2-.216.299-.003.597.01.893.056.178.028.186.028.187.226l.001 1.508h-.001zm24.337.012v1.484c0 .208-.004.21-.212.208a10.826 10.826 0 01-.817-.039c-.136-.01-.175-.067-.166-.19v-.052c-.02-.954-.042-1.908-.06-2.862-.001-.05-.004-.102-.002-.153.003-.193.003-.198.196-.196.265.001.529.015.793.041.323.032.266.072.268.328v1.431zm-33.559 1.16c.007.272.007.272-.253.335-.176.043-.352.09-.53.13-.151.034-.178.015-.204-.134l-.541-3.038c-.036-.21-.027-.222.179-.259.253-.044.505-.088.758-.128.161-.025.182-.016.214.162.064.36.124.72.172 1.083.073.573.133 1.149.2 1.723.005.042.003.085.005.127zM39.1 7.945c.331-.054.665-.11 1-.162.12-.019.156.057.171.164.057.396.129.79.175 1.186.069.575.163 1.147.18 1.726l.003.18c.003.091-.043.139-.128.159-.226.05-.453.102-.678.156-.108.026-.145-.02-.163-.126-.067-.403-.146-.804-.215-1.205-.117-.662-.231-1.324-.345-1.986-.003-.024 0-.05 0-.092zm-15.232 2.322c-.01.352.011.659-.037.965-.014.097-.042.16-.146.169-.224.018-.447.036-.67.059-.107.011-.137-.035-.155-.141-.05-.313-.04-.63-.071-.944-.057-.594-.081-1.191-.12-1.786-.009-.145-.023-.29-.035-.434-.006-.081.026-.127.112-.13.29-.012.578-.065.869-.054.17.006.184.017.196.189.008.119.006.239.009.359l.048 1.748zm24.326-.341c0 .41.005.82 0 1.23-.004.212-.028.23-.229.25-.199.018-.396.033-.594.054-.112.012-.164-.02-.171-.15-.029-.544-.068-1.088-.106-1.632-.03-.451-.063-.902-.094-1.352-.004-.052-.001-.103-.004-.154-.005-.09.022-.143.123-.146.281-.01.56-.064.843-.054.173.006.176.009.189.189.042.587.046 1.176.043 1.765zM15.46 17.249c.355.392.373.856.256 1.341-.118.486-.387.886-.713 1.245-.546.6-1.207 1.042-1.909 1.418a13.319 13.319 0 01-3.827 1.333 22.16 22.16 0 01-2.91.376c-.298.016-.595.03-.893.028-.216 0-.433.006-.648-.002-.184-.006-.21-.038-.225-.23-.056-.688-.103-1.377-.164-2.065-.072-.798-.155-1.595-.232-2.392-.056-.577-.105-1.155-.167-1.73-.071-.678-.151-1.355-.23-2.033-.07-.626-.14-1.252-.215-1.879-.084-.694-.171-1.386-.264-2.078-.09-.667-.185-1.333-.283-1.999-.16-1.095-.333-2.189-.521-3.28a69.862 69.862 0 00-.507-2.66c-.025-.118.01-.165.114-.208.992-.413 1.981-.833 2.973-1.248.184-.077.373-.141.57-.178.135-.025.17.003.166.14-.01.35.004.701-.03 1.05a3.478 3.478 0 00-.014.281c-.016 1.255-.03 2.51.002 3.766.03 1.1.087 2.199.15 3.298.05.868.122 1.736.197 2.602.072.849.16 1.697.244 2.546.015.161.03.176.213.152.36-.055.725-.085 1.09-.09 1.133-.003 2.248.153 3.35.415.966.23 1.904.536 2.804.963.446.212.872.457 1.26.767.133.105.251.225.363.351zm24.154-.206c.439.386.598.858.474 1.442-.104.482-.338.887-.651 1.25-.502.582-1.112 1.024-1.771 1.394-1.294.726-2.671 1.198-4.12 1.47-.79.15-1.587.262-2.389.334-.454.04-.91.088-1.419.057h-.595c-.116 0-.182-.037-.192-.175-.043-.603-.094-1.206-.148-1.81-.058-.636-.122-1.273-.182-1.91-.055-.584-.106-1.17-.165-1.756-.055-.551-.118-1.101-.178-1.652-.055-.517-.109-1.034-.17-1.55-.073-.626-.15-1.252-.228-1.877-.073-.584-.145-1.167-.222-1.75-.083-.625-.17-1.25-.261-1.873-.122-.81-.253-1.616-.382-2.423a70.147 70.147 0 00-.624-3.417c-.01-.05-.014-.102-.03-.15-.035-.11 0-.17.107-.212 1.054-.413 2.074-.912 3.138-1.305.139-.052.28-.11.43-.126.135-.013.169.009.156.153-.071.783-.03 1.57-.067 2.354-.03.64-.027 1.28.005 1.92.008.163.014.326.013.488-.009.768.032 1.536.07 2.304.051 1.014.124 2.026.2 3.038.053.731.124 1.46.192 2.19.037.4.076.8.125 1.197.027.219.038.22.253.192a7.627 7.627 0 011.14-.088 15.02 15.02 0 013.95.599c.874.249 1.725.56 2.529.995.362.193.702.427 1.012.697zM8.609 20.83c.496-.237 2.907-2.126 3.098-2.434-1.17-.506-2.344-.975-3.606-1.36l.508 3.794zm27.377-2.31c.061-.067.055-.119-.03-.156-.166-.076-.331-.157-.5-.227-.9-.369-1.805-.726-2.732-1.018-.081-.025-.164-.081-.268-.033l.5 3.728c.074.016.103-.018.136-.041.843-.62 1.69-1.233 2.5-1.9.136-.111.272-.224.394-.353z"/>
+      </svg>
+    </a>
+    <nav class="top-nav">
+      <a class="top-nav-item" href="/search">首页</a>
+      <a class="top-nav-item" href="/live">直播</a>
+    </nav>
+    <div class="user-actions" id="userActions">
+      <a class="login-btn" id="loginEntry" href="/account">登录</a>
+      <a class="user-icon active" href="/dynamic" title="动态">
+        <svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <path id="icon-blade-dynamic2" d="M12,12 A5,5 0 0 1 12,2 Z"/>
+            <use href="#icon-blade-dynamic2" transform="rotate(90 12 12)"/>
+            <use href="#icon-blade-dynamic2" transform="rotate(180 12 12)"/>
+            <use href="#icon-blade-dynamic2" transform="rotate(270 12 12)"/>
+          </g>
+        </svg>
+      </a>
+      <a class="user-icon" href="/message" title="消息">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M4 7l8 5 8-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      <span class="nav-badge" id="navMsgBadge" style="display:none"></span></a>
+      <a class="user-icon" href="/account?tab=fav" title="收藏">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7L12 3.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+        </svg>
+      </a>
+      <a class="user-icon always-show" href="/player" title="播放器">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M10.3 8.5L15.8 12L10.3 15.5V8.5Z" fill="currentColor"/>
+        </svg>
+      </a>
+      <a class="user-icon" href="/settings" title="设置">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.5-2-3.5-2.4.6a7.4 7.4 0 0 0-1.7-1L14.8 3h-4l-.5 2.6a7.4 7.4 0 0 0-1.7 1l-2.4-.6-2 3.5L6.2 11a7.6 7.6 0 0 0 0 2l-2 1.5 2 3.5 2.4-.6a7.4 7.4 0 0 0 1.7 1l.5 2.6h4l.5-2.6a7.4 7.4 0 0 0 1.7-1l2.4.6 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+        </svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<div class="dy-wrap">
+  <div class="dy-toolbar" id="toolbar">
+    <button type="button" class="dy-tab active" data-type="all">全部动态</button>
+    <button type="button" class="dy-tab" data-type="video">视频投稿</button>
+    <button type="button" class="dy-refresh" id="refreshBtn" title="刷新">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>刷新
+    </button>
+  </div>
+  <button type="button" class="dy-newpill" id="newPill"></button>
+  <div id="feed"></div>
+  <div id="sentinel" style="height:1px"></div>
+  <div id="feedState"></div>
+</div>
+
+<div class="dy-lb" id="lightbox" aria-hidden="true">
+  <button type="button" class="dy-lb-btn dy-lb-close" id="lbClose" aria-label="关闭">&times;</button>
+  <button type="button" class="dy-lb-btn dy-lb-prev" id="lbPrev" aria-label="上一张">&#8249;</button>
+  <img id="lbImg" alt="">
+  <button type="button" class="dy-lb-btn dy-lb-next" id="lbNext" aria-label="下一张">&#8250;</button>
+  <div class="dy-lb-count" id="lbCount"></div>
+</div>
+
+<div class="bvid-toast" id="bvidToast"></div>
+
+<script>
+// ============ 登录凭证 / 设备 ID（与其它页面一致） ============
+let _credsMem = {};
+try { const raw = localStorage.getItem('bili_creds'); if (raw) _credsMem = JSON.parse(raw) || {}; } catch (e) {}
+function _cookieHeader() { return Object.keys(_credsMem || {}).map(k => `${k}=${_credsMem[k]}`).join('; '); }
+let _deviceId = '';
+try { _deviceId = localStorage.getItem('bili_device_id') || ''; if (!_deviceId) { _deviceId = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('bili_device_id', _deviceId); } } catch (e) {}
+const _origFetch = window.fetch.bind(window);
+window.fetch = (input, opts) => {
+  opts = opts || {};
+  const ch = _cookieHeader();
+  const setH = (k, v) => { if (opts.headers instanceof Headers) opts.headers.set(k, v); else opts.headers = Object.assign({}, opts.headers), opts.headers[k] = v; };
+  if (_deviceId) setH('X-Device-Id', _deviceId);
+  if (ch) setH('X-Bili-Cookie', ch);
+  return _origFetch(input, opts);
+};
+
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function faceUrl(f) { f = String(f || ''); return f.startsWith('//') ? 'https:' + f : f; }
+function fmtCount(n) {
+  n = Number(n) || 0;
+  if (n >= 100000000) return (n / 100000000).toFixed(1).replace(/\.0$/, '') + '亿';
+  if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, '') + '万';
+  return String(n);
+}
+let toastTimer = null;
+function showToast(text) {
+  const t = document.getElementById('bvidToast');
+  t.textContent = text; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
+}
+function absTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000), p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function applyHeaderLogin(m) {
+  const cur = document.getElementById('loginEntry');
+  if (!cur) return;
+  const a = document.createElement('a');
+  a.id = 'loginEntry'; a.href = '/account';
+  if (m.loggedIn && m.user) {
+    a.className = 'avatar-btn'; a.title = m.user.uname || '';
+    if (m.user.face) {
+      const img = document.createElement('img');
+      img.src = faceUrl(m.user.face); img.referrerPolicy = 'no-referrer'; img.alt = m.user.uname || '';
+      a.appendChild(img);
+    } else { a.textContent = (m.user.uname || '我').slice(0, 1); }
+  } else { a.className = 'login-btn'; a.textContent = '登录'; }
+  cur.replaceWith(a);
+}
+
+/* ============ 渲染 ============ */
+// 服务端已对上游文本做过转义（正文里的 <a>/<img> 也是服务端拼的），这里直接按 HTML 输出
+const IC = {
+  forward: '<svg viewBox="0 0 24 24" fill="none"><path d="M14 5l7 6.5-7 6.5v-4c-5 0-8.5 1.2-11 4.5.6-5.5 4-9.5 11-10V5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  comment: '<svg viewBox="0 0 24 24" fill="none"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H11l-4.5 4v-4h-1A1.5 1.5 0 0 1 4 14.5v-9Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  like: '<svg viewBox="0 0 24 24" fill="none"><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3Zm0 0l4.5-8a2 2 0 0 1 3.5 1.5V9h4.2a2 2 0 0 1 1.97 2.3l-1.1 7A2 2 0 0 1 18.1 20H10a3 3 0 0 1-3-3v-6Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+};
+const img = (url) => `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`;
+
+function imagesHTML(images, extra, idPrefix) {
+  if (!images || !images.length) return '';
+  const cells = images.map((im, i) => `<button type="button" class="dy-img" data-lb="${idPrefix}" data-i="${i}">${img(im.url)}</button>`).join('');
+  const more = extra > 0 ? `<div class="dy-img-more">共 ${images.length + extra} 张，这里显示前 ${images.length} 张</div>` : '';
+  return `<div class="dy-images count-${Math.min(images.length, 9)}">${cells}</div>${more}`;
+}
+
+function cardHTML(c) {
+  if (!c) return '';
+  if (c.kind === 'none') return `<div class="dy-none">${c.tips}</div>`;
+  let href = '', target = '';
+  if (c.kind === 'video') href = `/player?bv=${encodeURIComponent(c.bvid || '')}${c.bvid ? '' : '&av=' + c.aid}`;
+  else if (c.kind === 'live' && c.roomId) href = `/stream?room_id=${c.roomId}`;
+  else if (c.url) { href = c.url; target = ' target="_blank" rel="noreferrer noopener"'; }
+  const tag = href ? 'a' : 'div';
+  const hrefAttr = href ? ` href="${esc(href)}"${target}` : '';
+  const cover = c.cover ? `<span class="dy-card-cover">${img(c.cover)}${c.duration ? `<span class="dy-card-dur">${esc(c.duration)}</span>` : ''}${c.kind === 'live' && c.liveState ? '<span class="dy-card-live">直播中</span>' : ''}</span>` : '';
+  const stats = c.kind === 'video' && (c.play || c.danmaku)
+    ? `<span class="dy-card-stats">${c.play ? `<span>▶ ${esc(c.play)}</span>` : ''}${c.danmaku ? `<span>弹 ${esc(c.danmaku)}</span>` : ''}</span>` : '';
+  const brief = c.desc ? `<span class="dy-card-brief">${c.desc}</span>` : '';
+  const badge = c.badge || c.label ? `<span class="dy-badge">${c.badge || c.label}</span>` : '';
+  return `<${tag} class="dy-card"${hrefAttr}>${cover}<span class="dy-card-info"><span class="dy-card-title">${c.title || ''}</span>${brief}${badge}${stats}</span></${tag}>`;
+}
+
+function authorHref(a) { return a.mid ? `/account?mid=${a.mid}` : '#'; }
+
+function forwardHTML(f, idPrefix) {
+  if (!f) return `<div class="dy-none">原动态已被删除或不可见</div>`;
+  const a = f.author || {};
+  return `<div class="dy-forward">
+    <div class="dy-forward-author">@<a href="${esc(authorHref(a))}">${a.name || '原动态'}</a></div>
+    ${f.title ? `<div class="dy-title">${f.title}</div>` : ''}
+    ${f.text ? `<div class="dy-text">${f.text}</div>` : ''}
+    ${imagesHTML(f.images, f.extraImageCount, idPrefix)}
+    ${cardHTML(f.card)}
+  </div>`;
+}
+
+let items = [];            // 已加载的动态模型（点赞状态等会改里面的字段）
+const lbGroups = {};       // 灯箱图片组：key -> images
+
+function itemHTML(it, index) {
+  const a = it.author;
+  const meta = [a.time, a.pubAction].filter(Boolean).join(' · ');
+  const tags = [it.pinned ? '<span class="dy-tag pink">置顶</span>' : '', it.visible === false ? '<span class="dy-tag">已折叠</span>' : ''].join('');
+  lbGroups['m' + index] = it.images;
+  if (it.forward) lbGroups['f' + index] = it.forward.images;
+  const hasBody = it.text || it.title || it.images.length || it.card || it.forward;
+  const fallback = !hasBody ? `<div class="dy-none">这条动态暂不支持在此显示，<a href="${esc(it.url)}" target="_blank" rel="noreferrer noopener" style="color:var(--blue)">去 B 站查看</a></div>` : '';
+  return `<article class="dy-item" data-index="${index}">
+    <div class="dy-head">
+      <a class="dy-avatar" href="${esc(authorHref(a))}">${a.face ? img(a.face) : ''}</a>
+      <div class="dy-author">
+        <a class="dy-name" href="${esc(authorHref(a))}">${a.name || '未知用户'}</a>
+        <div class="dy-sub" title="${esc(absTime(a.ts))}"><span>${esc(meta)}</span>${tags}</div>
+      </div>
+    </div>
+    <div class="dy-body">
+      ${it.dispute ? `<div class="dy-fold">${it.dispute}</div>` : ''}
+      ${it.title ? `<div class="dy-title">${it.title}</div>` : ''}
+      ${it.text ? `<div class="dy-text clamp">${it.text}</div><button type="button" class="dy-more" style="display:none">展开全文</button>` : ''}
+      ${imagesHTML(it.images, it.extraImageCount, 'm' + index)}
+      ${cardHTML(it.card)}
+      ${it.forward !== undefined ? forwardHTML(it.forward, 'f' + index) : ''}
+      ${fallback}
+      ${it.foldStatement ? `<div class="dy-fold" style="margin-top:8px">${it.foldStatement}</div>` : ''}
+    </div>
+    <div class="dy-foot">
+      <a class="dy-stat" href="${esc(it.url)}" target="_blank" rel="noreferrer noopener" title="在 B 站转发">${IC.forward}<span>${it.stat.forward ? fmtCount(it.stat.forward) : '转发'}</span></a>
+      <a class="dy-stat" href="${esc(it.url)}" target="_blank" rel="noreferrer noopener" title="在 B 站查看评论">${IC.comment}<span>${it.stat.comment ? fmtCount(it.stat.comment) : '评论'}</span></a>
+      <button type="button" class="dy-stat dy-like${it.stat.liked ? ' active' : ''}" data-like="${index}" title="点赞">${IC.like}<span>${it.stat.like ? fmtCount(it.stat.like) : '点赞'}</span></button>
+    </div>
+  </article>`;
+}
+
+// 把"超过 6 行"的正文标出来，给展开按钮
+function bindClamp(root) {
+  root.querySelectorAll('.dy-text.clamp').forEach(el => {
+    const btn = el.nextElementSibling;
+    if (!btn || !btn.classList.contains('dy-more')) return;
+    if (el.scrollHeight > el.clientHeight + 2) {
+      btn.style.display = '';
+      btn.onclick = () => {
+        const open = el.classList.toggle('clamp') === false;
+        btn.textContent = open ? '收起' : '展开全文';
+      };
+    }
+  });
+}
+
+/* ============ 数据加载 ============ */
+const feedEl = document.getElementById('feed');
+const stateEl = document.getElementById('feedState');
+const sentinel = document.getElementById('sentinel');
+let curType = 'all', offset = '', hasMore = true, loading = false, loggedIn = false, baseline = '', gen = 0;
+
+function skeleton() {
+  const one = `<div class="sk-item"><div class="sk-row"><div class="sk sk-avatar"></div><div style="flex:1"><div class="sk" style="height:14px;width:120px;margin-bottom:8px"></div><div class="sk" style="height:11px;width:80px"></div></div></div><div class="sk" style="height:14px;margin:16px 0 8px"></div><div class="sk" style="height:14px;width:70%"></div><div class="sk" style="height:150px;margin-top:14px"></div></div>`;
+  return one + one;
+}
+function showLogin() {
+  feedEl.innerHTML = '';
+  stateEl.innerHTML = `<div class="dy-login"><h2>登录后查看关注的动态</h2><p>动态流需要登录 B 站账号</p><a href="/account">去登录</a></div>`;
+  document.getElementById('toolbar').style.display = 'none';
+}
+
+async function load(reset) {
+  if (loading) return;
+  if (!reset && !hasMore) return;
+  loading = true;
+  const myGen = gen;
+  if (reset) {
+    feedEl.innerHTML = skeleton(); stateEl.innerHTML = '';
+    offset = ''; hasMore = true; items = [];
+    for (const k of Object.keys(lbGroups)) delete lbGroups[k];
+  } else {
+    stateEl.innerHTML = '<div class="dy-state">加载中…</div>';
+  }
+  try {
+    const q = new URLSearchParams({ type: curType });
+    if (offset) q.set('offset', offset);
+    const r = await fetch('/api/dynamics?' + q);
+    const d = await r.json().catch(() => ({}));
+    if (myGen !== gen) return;                      // 切换了标签，丢掉过期响应
+    if (r.status === 401) { loggedIn = false; showLogin(); return; }
+    if (!r.ok) throw new Error(d.error || '加载失败');
+    const start = items.length;
+    if (reset) feedEl.innerHTML = '';
+    d.list.forEach(it => items.push(it));
+    feedEl.insertAdjacentHTML('beforeend', d.list.map((it, i) => itemHTML(it, start + i)).join(''));
+    bindClamp(feedEl);
+    offset = d.offset || '';
+    hasMore = !!d.hasMore;
+    if (reset && d.baseline && curType === 'all') {
+      baseline = d.baseline;
+      try { localStorage.setItem('bili_dyn_baseline', baseline); } catch (e) {}
+      hideNewPill();
+    }
+    if (!items.length) stateEl.innerHTML = '<div class="dy-empty">暂时没有动态，去关注更多 UP 主吧~</div>';
+    else stateEl.innerHTML = hasMore ? '' : '<div class="dy-state">已经到底啦</div>';
+  } catch (e) {
+    if (myGen !== gen) return;
+    if (reset) feedEl.innerHTML = '';
+    stateEl.innerHTML = `<div class="dy-state">${esc(e.message || '加载失败')}<br><button type="button" class="btn" id="retryBtn">重试</button></div>`;
+    document.getElementById('retryBtn').onclick = () => load(reset);
+  } finally {
+    if (myGen === gen) loading = false;
+  }
+}
+
+function reload() { gen++; loading = false; load(true); window.scrollTo({ top: 0 }); }
+
+document.querySelectorAll('.dy-tab').forEach(btn => btn.addEventListener('click', () => {
+  if (btn.dataset.type === curType) return;
+  curType = btn.dataset.type;
+  document.querySelectorAll('.dy-tab').forEach(b => b.classList.toggle('active', b === btn));
+  reload();
+}));
+const refreshBtn = document.getElementById('refreshBtn');
+refreshBtn.addEventListener('click', async () => {
+  refreshBtn.classList.add('spin');
+  reload();
+  setTimeout(() => refreshBtn.classList.remove('spin'), 800);
+});
+
+// 滚到底自动加载下一页
+new IntersectionObserver((es) => { if (es[0].isIntersecting && loggedIn && !loading) load(false); }, { rootMargin: '500px' }).observe(sentinel);
+
+/* ============ 新动态提示 ============ */
+const newPill = document.getElementById('newPill');
+function hideNewPill() { newPill.classList.remove('show'); }
+newPill.addEventListener('click', () => { hideNewPill(); reload(); });
+async function checkUpdate() {
+  if (!loggedIn || !baseline || curType !== 'all' || document.hidden) return;
+  try {
+    const r = await fetch('/api/dynamics/update?baseline=' + encodeURIComponent(baseline));
+    const d = await r.json();
+    if (r.ok && d.updateNum > 0) { newPill.textContent = `有 ${d.updateNum > 99 ? '99+' : d.updateNum} 条新动态，点击刷新`; newPill.classList.add('show'); }
+  } catch (e) {}
+}
+setInterval(checkUpdate, 60000);
+
+/* ============ 点赞 ============ */
+feedEl.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-like]');
+  if (!btn) return;
+  const it = items[Number(btn.dataset.like)];
+  if (!it || btn.classList.contains('busy')) return;
+  const want = !it.stat.liked;
+  const apply = (liked) => {
+    it.stat.like = Math.max(0, it.stat.like + (liked ? 1 : -1));
+    it.stat.liked = liked;
+    btn.classList.toggle('active', liked);
+    btn.querySelector('span').textContent = it.stat.like ? fmtCount(it.stat.like) : '点赞';
+  };
+  apply(want);                                      // 乐观更新，失败再回滚
+  btn.classList.add('busy');
+  try {
+    const r = await fetch('/api/dynamics/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dynId: it.id, like: want }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      apply(!want);
+      showToast(d.error || (want ? '点赞失败' : '取消点赞失败'));
+      if (r.status === 401) setTimeout(() => location.href = '/account', 1200);
+    }
+  } catch (err) { apply(!want); showToast('网络异常，请重试'); }
+  finally { btn.classList.remove('busy'); }
+});
+
+/* ============ 图片灯箱 ============ */
+const lb = document.getElementById('lightbox'), lbImg = document.getElementById('lbImg'), lbCount = document.getElementById('lbCount');
+let lbList = [], lbIdx = 0;
+function lbShow() {
+  lbImg.src = lbList[lbIdx].url;
+  lbCount.textContent = `${lbIdx + 1} / ${lbList.length}`;
+}
+function lbOpen(list, i) {
+  if (!list || !list.length) return;
+  lbList = list; lbIdx = i; lb.classList.toggle('single', list.length < 2);
+  lb.classList.add('show'); lb.setAttribute('aria-hidden', 'false'); lbShow();
+  document.body.style.overflow = 'hidden';
+}
+function lbClose() { lb.classList.remove('show'); lb.setAttribute('aria-hidden', 'true'); lbImg.removeAttribute('src'); document.body.style.overflow = ''; }
+function lbStep(d) { if (lbList.length < 2) return; lbIdx = (lbIdx + d + lbList.length) % lbList.length; lbShow(); }
+feedEl.addEventListener('click', (e) => {
+  const b = e.target.closest('.dy-img[data-lb]');
+  if (b) lbOpen(lbGroups[b.dataset.lb], Number(b.dataset.i));
+});
+document.getElementById('lbClose').onclick = lbClose;
+document.getElementById('lbPrev').onclick = (e) => { e.stopPropagation(); lbStep(-1); };
+document.getElementById('lbNext').onclick = (e) => { e.stopPropagation(); lbStep(1); };
+lb.addEventListener('click', (e) => { if (e.target === lb) lbClose(); });
+document.addEventListener('keydown', (e) => {
+  if (!lb.classList.contains('show')) return;
+  if (e.key === 'Escape') lbClose();
+  else if (e.key === 'ArrowLeft') lbStep(-1);
+  else if (e.key === 'ArrowRight') lbStep(1);
+});
+// 手机左右滑动切图
+let tx = 0;
+lb.addEventListener('touchstart', (e) => { tx = e.touches[0].clientX; }, { passive: true });
+lb.addEventListener('touchend', (e) => { const dx = e.changedTouches[0].clientX - tx; if (Math.abs(dx) > 50) lbStep(dx < 0 ? 1 : -1); });
+
+/* ============ 入口 ============ */
+(async function init() {
+  let m = { loggedIn: false };
+  try { const r = await fetch('/api/me'); m = await r.json(); } catch (e) {}
+  applyHeaderLogin(m);
+  loggedIn = !!m.loggedIn;
+  if (!loggedIn) { showLogin(); return; }
+  load(true);
+})();
+</script>
+<script src="/msg-badge.js" defer></script>
+</body>
+</html>
