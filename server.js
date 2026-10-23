@@ -2991,6 +2991,247 @@ app.post("/api/message/send", async (req, res) => {
   }
 });
 
+// ============================= 动态 =============================
+// 参考 pilipawa：新版动态流 web-dynamic/v1/feed/all 一个 item 里层级很深，这里压成前端能直接画的模型。
+// 翻页用上游给的 offset（上一页最后一条的 id_str），没有页码。
+// 上游文本不受控，所有会拼进 innerHTML 的字段都在服务端先转义。
+
+const DYNAMIC_UPSTREAM = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all";
+const DYNAMIC_UPDATE_UPSTREAM = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all/update";
+const DYNAMIC_MAX_IMAGES = 9;
+
+function dynEsc(str) {
+  return String(str == null ? "" : str)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function dynSafeUrl(raw) {
+  const url = normalizeImgUrl(raw || "");
+  return /^https?:\/\//i.test(url) ? url : "";
+}
+function dynOneLine(raw) { return String(raw == null ? "" : raw).replace(/\s+/g, " ").trim(); }
+function dynImage(src, w, h) {
+  const url = normalizeImgUrl(src || "");
+  if (!url) return null;
+  return { url, width: Number(w) > 0 ? Number(w) : 0, height: Number(h) > 0 ? Number(h) : 0 };
+}
+function dynErrorText(code, fallback) {
+  if (code === -101) return "请先登录 B 站账号";
+  if (code === -352 || code === -799 || code === 412) return "加载失败，请稍后重试（上游风控）";
+  return fallback || "加载失败，请稍后重试";
+}
+
+// 正文：富文本节点拼成 HTML（表情→<img>，@/话题/链接→<a>）；没有节点时整段转义
+const DYN_LINK_NODE_TYPES = new Set(["RICH_TEXT_NODE_TYPE_AT", "RICH_TEXT_NODE_TYPE_TOPIC", "RICH_TEXT_NODE_TYPE_WEB"]);
+function dynRichText(desc) {
+  if (!desc) return "";
+  const nodes = Array.isArray(desc.rich_text_nodes) ? desc.rich_text_nodes : [];
+  if (!nodes.length) return dynEsc(desc.text);
+  return nodes.map((node) => {
+    const type = node && node.type;
+    const txt = dynEsc(node && (node.text != null ? node.text : node.orig_text));
+    if (type === "RICH_TEXT_NODE_TYPE_EMOJI") {
+      const e = node.emoji || {};
+      const src = normalizeImgUrl(e.gif_url || e.icon_url || "");
+      if (!src) return txt;
+      return `<img class="dy-emote" src="${dynEsc(src)}" alt="${dynEsc(e.text || node.text || "表情")}" loading="lazy" referrerpolicy="no-referrer">`;
+    }
+    if (DYN_LINK_NODE_TYPES.has(type)) {
+      const href = dynSafeUrl(node.jump_url);
+      if (href) return `<a href="${dynEsc(href)}" target="_blank" rel="noreferrer noopener">${txt}</a>`;
+    }
+    return txt;
+  }).join("");
+}
+
+// 主体卡片：视频/图文/专栏/直播等各自挑出要展示的字段；未识别类型返回 null，前端降级成"作者+文字"
+function dynCard(major) {
+  const type = major && major.type;
+  if (!type) return null;
+
+  if (type === "MAJOR_TYPE_ARCHIVE" || type === "MAJOR_TYPE_UGC_SEASON") {
+    const v = major.archive || major.ugc_season || {};
+    const bvid = v.bvid || "";
+    const aid = parseInt(v.aid, 10) || 0;
+    if (!bvid && !aid) return null;
+    return {
+      kind: "video", aid, bvid,
+      title: dynEsc(v.title), desc: dynEsc(dynOneLine(v.desc)),
+      cover: normalizeImgUrl(v.cover || ""),
+      duration: v.duration_text || "", play: v.stat?.play || "", danmaku: v.stat?.danmaku || "",
+      badge: dynEsc(v.badge?.text),
+    };
+  }
+  if (type === "MAJOR_TYPE_DRAW") {
+    const images = (major.draw?.items || []).map((it) => dynImage(it.src, it.width, it.height)).filter(Boolean);
+    return images.length ? { kind: "draw", images } : null;
+  }
+  // 新版图文：正文/图片都在 opus 里
+  if (type === "MAJOR_TYPE_OPUS") {
+    const o = major.opus || {};
+    const images = (o.pics || []).map((it) => dynImage(it.url || it.src, it.width, it.height)).filter(Boolean);
+    return {
+      kind: "opus",
+      title: dynEsc(o.title),
+      summary: dynRichText(o.summary),
+      images,
+      url: dynSafeUrl(o.jump_url),
+    };
+  }
+  if (type === "MAJOR_TYPE_ARTICLE") {
+    const a = major.article || {};
+    return {
+      kind: "article", title: dynEsc(a.title), cover: normalizeImgUrl((a.covers || [])[0] || ""),
+      desc: dynEsc(a.desc), label: dynEsc(a.label),
+      url: dynSafeUrl(a.jump_url) || (a.id ? `https://www.bilibili.com/read/cv${a.id}` : ""),
+    };
+  }
+  if (type === "MAJOR_TYPE_LIVE") {
+    const l = major.live || {};
+    return {
+      kind: "live", roomId: parseInt(l.id, 10) || 0, title: dynEsc(l.title), cover: normalizeImgUrl(l.cover || ""),
+      desc: [l.desc_first, l.desc_second].filter(Boolean).join(" · "), liveState: l.live_state === 1 ? 1 : 0,
+    };
+  }
+  if (type === "MAJOR_TYPE_LIVE_RCMD") {
+    let info = {};
+    try { info = JSON.parse(major.live_rcmd?.content || "{}").live_play_info || {}; } catch {}
+    return {
+      kind: "live", roomId: parseInt(info.room_id, 10) || 0, title: dynEsc(info.title),
+      cover: normalizeImgUrl(info.cover || ""), desc: dynEsc(info.watched_show?.text_large || info.area_name || ""),
+      liveState: info.live_status === 1 ? 1 : 0,
+    };
+  }
+  if (type === "MAJOR_TYPE_NONE") return { kind: "none", tips: dynEsc(major.none?.tips) || "该动态已被删除" };
+
+  // 剧集/课程/音频/一般类型：结构相似，只取标题/封面/描述 + 详情页链接
+  const src = (type === "MAJOR_TYPE_PGC" && major.pgc) || (type === "MAJOR_TYPE_COURSES" && major.courses) ||
+    (type === "MAJOR_TYPE_MUSIC" && major.music) || major.common || null;
+  if (!src) return null;
+  const url = dynSafeUrl(src.jump_url);
+  if (!url && !src.title && !src.cover) return null;
+  return {
+    kind: "generic", title: dynEsc(src.title), cover: normalizeImgUrl(src.cover || ""),
+    desc: dynEsc(src.desc || src.sub_title || src.label || ""), badge: dynEsc(src.badge?.text), url,
+  };
+}
+
+function dynMap(item) {
+  if (!item || !item.id_str) return null;
+  const modules = item.modules || {};
+  const dyn = modules.module_dynamic || {};
+  const card = dynCard(dyn.major || null);
+  if (!card && !dyn.desc && !item.orig) return null;
+
+  const a = modules.module_author || {};
+  if (!a.mid && !a.name) return null;
+
+  // 图片动态（draw / opus）的图合并成同一份 images，卡片里不再重复
+  let images = [];
+  let text = dynRichText(dyn.desc);
+  let title = "";
+  let outCard = card;
+  if (card && card.kind === "draw") { images = card.images; outCard = null; }
+  if (card && card.kind === "opus") {
+    images = card.images; title = card.title;
+    if (!text) text = card.summary;
+    outCard = null;
+  }
+  const st = modules.module_stat || {};
+  const mapped = {
+    id: item.id_str,
+    type: item.type || "",
+    url: `https://t.bilibili.com/${item.id_str}`,
+    pinned: !!modules.module_tag,
+    visible: item.visible !== false,
+    author: {
+      mid: a.mid || 0, name: dynEsc(a.name), face: normalizeImgUrl(a.face || ""),
+      time: a.pub_time || "", ts: Number(a.pub_ts) || 0, pubAction: dynEsc(a.pub_action),
+    },
+    title,
+    text,
+    images: images.slice(0, DYNAMIC_MAX_IMAGES),
+    extraImageCount: Math.max(0, images.length - DYNAMIC_MAX_IMAGES),
+    card: outCard,
+    stat: {
+      like: Number(st.like?.count) || 0, liked: !!st.like?.status,
+      comment: Number(st.comment?.count) || 0, forward: Number(st.forward?.count) || 0,
+    },
+    foldStatement: dynEsc(modules.module_fold?.statement),
+    dispute: modules.module_dispute?.title ? dynEsc(modules.module_dispute.title) : "",
+  };
+  if (item.type === "DYNAMIC_TYPE_FORWARD" && item.orig) mapped.forward = dynMap(item.orig);
+  return mapped;
+}
+
+app.get("/api/dynamics", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  const offset = String(req.query.offset || "").trim().slice(0, 40);
+  const type = req.query.type === "video" ? "video" : "all";
+  try {
+    const u = new URL(DYNAMIC_UPSTREAM);
+    u.searchParams.set("type", type);
+    if (offset) u.searchParams.set("offset", offset);
+    const j = await (await biliFetch(u.toString(), {}, session)).json();
+    if (j.code === -101) return res.status(401).json({ code: -101, error: dynErrorText(-101) });
+    if (j.code !== 0) return res.status(502).json({ error: dynErrorText(j.code, "加载动态失败，请稍后重试") });
+    const list = (j.data?.items || []).map(dynMap).filter(Boolean);
+    const nextOffset = j.data?.offset || "";
+    const rawBase = String(j.data?.update_baseline || "");
+    res.json({
+      list,
+      baseline: /^\d{1,25}$/.test(rawBase) ? rawBase : String((list[0] && list[0].id) || ""),
+      hasMore: !!j.data?.has_more && !!nextOffset && nextOffset !== offset,
+      offset: nextOffset,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "加载动态失败（网络异常）" });
+  }
+});
+
+// 有没有新动态：只回数量。上游要带"上次看到的第一条动态 id"（update_baseline）
+app.get("/api/dynamics/update", async (req, res) => {
+  const baseline = String(req.query.baseline || "").trim();
+  if (baseline && !/^\d{1,25}$/.test(baseline)) return res.status(400).json({ error: "baseline 参数不合法" });
+  const session = requireSession(req, res);
+  if (!session) return;
+  try {
+    const u = new URL(DYNAMIC_UPDATE_UPSTREAM);
+    u.searchParams.set("type", "all");
+    if (baseline) u.searchParams.set("update_baseline", baseline);
+    const j = await (await biliFetch(u.toString(), {}, session)).json();
+    if (j.code === -101) return res.status(401).json({ code: -101, error: dynErrorText(-101) });
+    if (j.code !== 0) return res.status(502).json({ error: dynErrorText(j.code, "检查新动态失败") });
+    res.json({ updateNum: Number(j.data?.update_num) || 0 });
+  } catch (e) {
+    res.status(500).json({ error: "检查新动态失败（网络异常）" });
+  }
+});
+
+// 动态点赞：x/dynamic/feed/dyn/thumb，参数走 json 正文，csrf 在 URL 上；up=1 点赞 / 2 取消
+app.post("/api/dynamics/like", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  const dynId = String(req.body.dynId || "").trim();
+  const like = !!req.body.like;
+  if (!/^\d{15,20}$/.test(dynId)) return res.status(400).json({ error: "缺少动态 id" });
+  try {
+    const u = new URL("https://api.bilibili.com/x/dynamic/feed/dyn/thumb");
+    u.searchParams.set("csrf", session.cookies.bili_jct || "");
+    const j = await (await biliFetch(u.toString(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://t.bilibili.com", Referer: "https://t.bilibili.com/" },
+      body: JSON.stringify({ dyn_id_str: dynId, up: like ? 1 : 2 }),
+    }, session)).json();
+    if (j.code === -101) return res.status(401).json({ code: -101, error: dynErrorText(-101) });
+    if (j.code !== 0) return res.status(502).json({ code: j.code, error: j.message || (like ? "点赞失败" : "取消点赞失败") });
+    res.json({ ok: true, liked: like });
+  } catch (e) {
+    res.status(500).json({ error: "点赞失败（网络异常）" });
+  }
+});
+
 // ----------------------------- 环境诊断（排查平板/WebView 登录问题） -----------------------------
 app.get("/api/diag/set-cookie", (req, res) => {
   res.cookie("diag_cookie", "ok", { httpOnly: true, path: "/", maxAge: 60000, sameSite: "lax" });
@@ -3016,6 +3257,7 @@ app.get("/live", (req, res) => res.sendFile(path.join(__dirname, "public", "live
 app.get("/stream", (req, res) => res.sendFile(path.join(__dirname, "public", "stream.html")));
 app.get("/message", (req, res) => res.sendFile(path.join(__dirname, "public", "message.html")));
 app.get("/settings", (req, res) => res.sendFile(path.join(__dirname, "public", "settings.html")));
+app.get("/dynamic", (req, res) => res.sendFile(path.join(__dirname, "public", "dynamic.html")));
 
 // ----------------------------- 直播弹幕转发（WebSocket） -----------------------------
 // 浏览器不方便直接连 B 站直播弹幕协议（二进制帧），所以由服务端先调 getDanmuInfo
