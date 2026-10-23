@@ -45,8 +45,92 @@ function savePersistedCookies() {
   if (!PERSIST_COOKIES) return; // 内存模式：不写盘
   try {
     persistedCookies.buvid3 = cachedCookie;
+    persistedCookies.accounts = Object.fromEntries(accountDevices); // devices 字段仍由 getSession 按 X-Device-Id 维护
     fs.writeFileSync(COOKIE_FILE, JSON.stringify(persistedCookies, null, 2));
   } catch (e) { console.error("data/ 写入失败:", e.message); }
+}
+
+// ---------------- 账号专属设备指纹（风控优化） ----------------
+// 背景：匿名侧只维护一套全局 buvid3（ensureCookie），如果所有登录账号都共用它，
+// 上游看来就像"一台机器在批量操作"，点赞/投币/收藏写接口会被概率性 -403/-352。
+// 这里为每个登录账号（按 DedeUserID）分配一套独立设备指纹（buvid3/buvid4/_uuid），
+// 并配一个随机的桌面 Chrome UA，让每个账号看起来是独立的一台浏览器设备。
+const accountDevices = new Map(); // key: DedeUserID -> { buvid3, buvid4, _uuid, ua }
+try {
+  if (PERSIST_COOKIES && persistedCookies.accounts) {
+    for (const [uid, d] of Object.entries(persistedCookies.accounts)) {
+      if (d && d.buvid3) accountDevices.set(uid, d);
+    }
+  }
+} catch (e) { console.error("accounts 读取失败:", e.message); }
+
+// 网页端 _uuid 格式：UUID v4 + 5 位数字 + "infoc" 后缀
+function buildDeviceUuid() {
+  const hex = "0123456789abcdef";
+  const pick = (n) => Array.from({ length: n }, () => hex[Math.floor(Math.random() * 16)]).join("");
+  const tail = String(Date.now() % 100000).padStart(5, "0");
+  return `${pick(8)}-${pick(4)}-4${pick(3)}-8${pick(3)}-${pick(12)}${tail}infoc`;
+}
+
+// 随机桌面 Chrome UA（版本号在 124~138 之间浮动），避免所有账号共用同一固定 UA
+function randomUA() {
+  const major = 124 + Math.floor(Math.random() * 15);
+  const build = Math.floor(Math.random() * 8999) + 1000;
+  const patch = Math.floor(Math.random() * 90) + 10;
+  return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.${build}.${patch} Safari/537.36`;
+}
+
+// 取一套全新设备指纹：finger/spi 给 buvid3/buvid4，首页 Set-Cookie 补齐 b_nut 等，
+// _uuid 本地生成（上游不下发，网页端就是客户端本地生成的）。
+async function fetchDeviceCookies() {
+  const cookies = {};
+  try {
+    const r = await fetch("https://api.bilibili.com/x/frontend/finger/spi", {
+      headers: COMMON_HEADERS,
+      signal: AbortSignal.timeout(8000),
+    });
+    const j = await r.json();
+    if (j.code === 0 && j.data) {
+      if (j.data.b_3) cookies.buvid3 = j.data.b_3;
+      if (j.data.b_4) cookies.buvid4 = j.data.b_4;
+    }
+  } catch {}
+  try {
+    const res = await fetch("https://www.bilibili.com/", {
+      headers: COMMON_HEADERS,
+      signal: AbortSignal.timeout(8000),
+    });
+    for (const c of extractSetCookies(res)) {
+      const first = c.split(";")[0];
+      const i = first.indexOf("=");
+      if (i > 0) {
+        const k = first.slice(0, i);
+        if (!cookies[k]) cookies[k] = first.slice(i + 1);
+      }
+    }
+  } catch {}
+  cookies._uuid = buildDeviceUuid();
+  return cookies;
+}
+
+// 按账号取（必要时生成）专属设备指纹。per-uid pending 去重：
+// 同一个账号首次登录/首请求时会同时打多个上游接口，只取一次指纹。
+const accountDevicesPending = new Map();
+function getAccountDevice(uid) {
+  if (!uid) return null;
+  if (accountDevices.has(uid)) return accountDevices.get(uid);
+  if (!accountDevicesPending.has(uid)) {
+    const p = fetchDeviceCookies().then((device) => {
+      accountDevicesPending.delete(uid);
+      if (!device || !device.buvid3) return null; // 取值失败，下次再试
+      device.ua = randomUA();
+      accountDevices.set(uid, device);
+      savePersistedCookies();
+      return device;
+    });
+    accountDevicesPending.set(uid, p);
+  }
+  return accountDevicesPending.get(uid);
 }
 
 // 登录态说明：
@@ -216,15 +300,29 @@ async function biliFetch(url, options = {}, session = null) {
 
   let cookieStr = "";
   if (session?.cookies) {
-    // 关键：登录会话里只有 SESSDATA/bili_jct/DedeUserID，没有 buvid3。
+    // 关键：登录会话里只有 SESSDATA/bili_jct/DedeUserID，buvid3 可能缺/可能是旧共享指纹。
     // 2026 起 B 站对点赞/投币/收藏写接口做概率性风控，缺 buvid3 会随机 -352，
-    // 表现为"有时候能点，有时候不行"。这里把匿名侧基础 cookie 与登录凭据合并。
-    if (!cachedCookie) {
-      try { await ensureCookie(); } catch {}
+    // 表现为"有时候能点，有时候不行"。
+    // 风控优化：按 DedeUserID 为每个账号分配独立设备指纹（buvid3/buvid4/_uuid）+ 随机 UA，
+    // 覆盖前端带回来的旧共享指纹，让每个账号在上游看来是独立的一台浏览器设备。
+    const uid = session.cookies.DedeUserID;
+    let accountDevice = null;
+    if (uid) {
+      try { accountDevice = await getAccountDevice(uid); } catch {}
     }
-    const base = parseCookieString(cachedCookie || "");
-    const merged = { ...base, ...session.cookies };
-    cookieStr = cookieHeader(merged);
+    if (accountDevice) {
+      const { ua, ...deviceCookies } = accountDevice;
+      cookieStr = cookieHeader({ ...session.cookies, ...deviceCookies }); // 专属指纹优先，登录三件套保留
+      if (ua) headers["User-Agent"] = ua;
+    } else {
+      // 专属指纹暂不可用：退回匿名侧基础 cookie + 登录凭据合并
+      if (!cachedCookie) {
+        try { await ensureCookie(); } catch {}
+      }
+      const base = parseCookieString(cachedCookie || "");
+      const merged = { ...base, ...session.cookies };
+      cookieStr = cookieHeader(merged);
+    }
   } else {
     // 匿名请求也需要 buvid3，否则直播/搜索等接口会 -352。ensureCookie 内部有缓存。
     if (!cachedCookie) {
@@ -370,6 +468,9 @@ function normalizeHistoryItem(item) {
     bvid: h.bvid || "",
     aid: h.aid || h.oid || null,
     cid: h.cid || 0,
+    // 分P信息：多P视频续播时要还原到上次看的那个P（参考 pilipawa）
+    page: h.page || 1,
+    part: h.part || "",
     title: sanitizeTitle(item.title || ""),
     author: item.author_name || item.author || "",
     pic: pic.startsWith("//") ? `https:${pic}` : pic,
@@ -379,7 +480,9 @@ function normalizeHistoryItem(item) {
     pubdate: item.view_at || 0,
     description: item.show_title || item.new_desc || "",
     business,
-    progress: h.progress ?? -1,
+    // ⚠ progress 是 item 顶层字段（history 子对象里没有，读 h.progress 恒为 undefined）：
+    // 看到第几秒，-1 = 已看完。之前误读成 h.progress 导致进度条不显示、续播参数不生效。
+    progress: item.progress ?? -1,
     viewAt: item.view_at || 0,
   };
 }
@@ -469,12 +572,21 @@ if (!cookies.SESSDATA) {
       });
     }
     // buvid3 一并交给前端存 localStorage，之后随 X-Bili-Cookie 整串带回。
-    // 登录票里没带就用匿名侧抓到的设备指纹补上，保证写接口不被 -352 风控。
+    // 风控优化：优先给这个账号取一套全新独立设备指纹（含 _uuid），
+    // 不再共用匿名侧那套全局 buvid3（多账号共用一个指纹 = 上游眼中的批量操作机器）。
     if (!cookies.buvid3) {
       try {
-        if (!cachedCookie) await ensureCookie();
-        const base = parseCookieString(cachedCookie || "");
-        if (base.buvid3) cookies.buvid3 = base.buvid3;
+        const device = await getAccountDevice(cookies.DedeUserID);
+        if (device) {
+          if (!cookies.buvid3) cookies.buvid3 = device.buvid3;
+          if (!cookies.buvid4) cookies.buvid4 = device.buvid4;
+          if (!cookies._uuid) cookies._uuid = device._uuid;
+        } else {
+          // 取指纹失败时兜底：先用匿名侧指纹保证写接口不 -352
+          if (!cachedCookie) await ensureCookie();
+          const base = parseCookieString(cachedCookie || "");
+          if (base.buvid3) cookies.buvid3 = base.buvid3;
+        }
       } catch {}
     }
     qrSessions.delete(loginId);
@@ -535,6 +647,12 @@ app.get("/api/me", async (req, res) => {
         face: j.data?.face,
         coin: j.data?.money,
         level: j.data?.level_info?.current_level,
+        // 等级经验（nav 接口才有）：current_min 本级起点 / current_exp 当前经验 / next_exp 升下一级所需
+        levelExp: {
+          min: j.data?.level_info?.current_min ?? null,
+          current: j.data?.level_info?.current_exp ?? null,
+          next: j.data?.level_info?.next_exp ?? null,
+        },
         vipStatus: j.data?.vipStatus,
         follower: relation.follower,
         following: relation.following,
@@ -1324,6 +1442,58 @@ app.post("/api/video/coin", async (req, res) => {
   }
 });
 
+// 一键三连错误码文案（与点赞/投币同源的常见错误）
+function tripleErrorText(code, fallback) {
+  switch (code) {
+    case -101: return "登录已失效，请重新扫码登录";
+    case -111: return "CSRF 校验失败，请重新登录";
+    case -104: return "硬币不足，无法完成三连";
+    case -400: return "请求参数错误";
+    case -403: return "账号异常，操作被风控拦截";
+    case -352: return "操作过于频繁或设备信息缺失，请稍后再试";
+    case 10003: return "不存在该稿件";
+    default: return fallback || "一键三连失败";
+  }
+}
+
+// 一键三连：官方组合接口 x/web-interface/archive/like/triple，一次请求同时完成
+// 点赞 + 投币（默认 2 枚）+ 收藏到默认收藏夹。无需 WBI 签名（同点赞/投币的老接口风格）。
+// 返回 data: { like: bool, coin: bool, fav: bool, multiply: 实际投币枚数 }。
+app.post("/api/video/triple", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  const bvid = String(req.body.bvid || "").trim();
+  const aid = parseInt(req.body.aid, 10) || 0;
+  if (!bvid && !aid) return res.status(400).json({ error: "缺少 bvid 或 aid" });
+
+  if (!session.cookies.bili_jct) {
+    return res.status(401).json({ code: -111, error: "缺少 CSRF 凭据，请重新登录" });
+  }
+
+  try {
+    const body = new URLSearchParams({ csrf: session.cookies.bili_jct || "" });
+    if (bvid) body.set("bvid", bvid); else body.set("aid", String(aid));
+    const j = await (await biliFetch("https://api.bilibili.com/x/web-interface/archive/like/triple", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://www.bilibili.com",
+        Referer: bvid
+          ? `https://www.bilibili.com/video/${bvid}`
+          : `https://www.bilibili.com/video/av${aid}`,
+      },
+      body,
+    }, session)).json();
+    if (j.code !== 0) {
+      return res.status(502).json({ code: j.code, error: tripleErrorText(j.code, j.message) });
+    }
+    res.json({ ok: true, data: j.data || {} });
+  } catch (e) {
+    console.error("三连异常:", e);
+    res.status(500).json({ error: "一键三连失败（网络异常）" });
+  }
+});
+
 
 
 // 收藏/取消收藏：统一收进登录用户的默认收藏夹(收藏夹列表中的第一个)。
@@ -1786,6 +1956,7 @@ app.get("/api/history", async (req, res) => {
     // 见接口清单 HistoryApi.getHistory。
     const u = new URL("https://api.bilibili.com/x/web-interface/history/cursor");
     u.searchParams.set("ps", String(ps));
+    u.searchParams.set("type", "archive"); // 只要视频稿件，直播/专栏/番剧不要（与 pilipawa 一致）
     const max = String(req.query.max || "").trim();
     const viewAt = String(req.query.view_at || "").trim();
     const business = String(req.query.business || "").trim();
@@ -1837,26 +2008,29 @@ app.post("/api/history/delete", async (req, res) => {
 });
 
 // 播放心跳：参考 WristBilibili 的 /x/report/web/heartbeat。
+// B 站没有单独的"添加历史记录"接口，心跳就是写入点：第一次上报把视频写进历史列表，
+// 之后每次上报更新 played_time（看到第几秒），换设备登录同一账号"继续播放"就能续上。
+// 参数与 pilipawa 对齐：始终 play_type=1，按播放中心跳上报，是否看完由 played_time 逼近时长判定。
 app.post("/api/history/heartbeat", async (req, res) => {
   const session = requireSession(req, res);
   if (!session) return;
   const aid = parseInt(req.body.aid, 10) || 0;
   const cid = parseInt(req.body.cid, 10) || 0;
   const playTime = Math.max(0, parseInt(req.body.played_time, 10) || 0);
-  const isFin = !!req.body.finished;
   if (!aid || !cid) return res.status(400).json({ error: "缺少 aid/cid" });
   try {
+    const nowSec = Math.floor(Date.now() / 1000);
     const body = new URLSearchParams({
       aid: String(aid),
       cid: String(cid),
       mid: String(session.user?.mid || session.cookies.DedeUserID || ""),
       csrf: session.cookies.bili_jct || "",
-      played_time: isFin ? "-1" : String(playTime),
+      played_time: String(playTime),
       realtime: String(playTime),
-      start_ts: String(Math.floor(Date.now() / 1000) - playTime),
+      start_ts: String(nowSec - playTime),
       type: "3",
       dt: "2",
-      play_type: isFin ? "4" : "1",
+      play_type: "1",
     });
     const j = await (await biliFetch("https://api.bilibili.com/x/report/web/heartbeat", {
       method: "POST",
@@ -2738,11 +2912,25 @@ app.post("/api/message/upload-image", async (req, res) => {
       fd.append("file_up", new Blob([buf], { type: "image/png" }), "image.png");
       fd.append("category", "daily");
       fd.append("csrf", session.cookies.bili_jct || "");
+      // 风控优化：动态发布也是登录写操作，用该账号专属指纹 + 随机 UA
+      let upCookies = { ...session.cookies };
+      let upUA = COMMON_HEADERS["User-Agent"];
+      try {
+        const uid = session.cookies.DedeUserID;
+        if (uid) {
+          const device = await getAccountDevice(uid);
+          if (device) {
+            const { ua, ...dc } = device;
+            upCookies = { ...upCookies, ...dc };
+            if (ua) upUA = ua;
+          }
+        }
+      } catch {}
       const upstream = await fetch("https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs", {
         method: "POST",
         headers: {
-          Cookie: cookieHeader({ ...parseCookieString(cachedCookie || ""), ...session.cookies }),
-          "User-Agent": COMMON_HEADERS["User-Agent"],
+          Cookie: cookieHeader(upCookies),
+          "User-Agent": upUA,
           "Referer": "https://t.bilibili.com/",
           "Origin": "https://t.bilibili.com",
         },
