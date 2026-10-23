@@ -259,6 +259,32 @@
     color: #fff;
   }
   .badge.level { background: var(--blue); }
+  /* 等级经验条：Lv.x 徽章右侧的一小条进度 */
+  .level-exp {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .level-exp-bar {
+    position: relative;
+    width: 68px;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(0, 161, 214, .18);
+    overflow: hidden;
+  }
+  .level-exp-fill {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--blue), #61c2ea);
+  }
+  .level-exp-text {
+    font-size: 10px;
+    line-height: 1;
+    color: var(--text-3);
+    white-space: nowrap;
+  }
   .hero-sign {
     margin-top: 6px;
     font-size: 13px;
@@ -341,34 +367,95 @@
   }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px 16px; }
-  .card { min-width: 0; cursor: pointer; }
-  .thumb { position: relative; aspect-ratio: 16/10; border-radius: 8px; overflow: hidden; background: #e7e8ea; }
-  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .18s; }
-  .dur {
+  /* —— 视频卡片：与 search.html 同款 —— */
+  .card {
+    background: var(--card);
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform .12s ease;
+    display: block;
+    color: inherit;
+    min-width: 0;
+  }
+  .card:hover { transform: translateY(-3px); }
+  .card:hover .title { color: var(--pink); }
+  .thumb-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    background: #e7e8ea;
+    overflow: hidden;
+  }
+  .thumb-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .thumb-wrap::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 40%;
+    background: linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0));
+    pointer-events: none;
+  }
+  .duration {
     position: absolute;
     right: 6px;
     bottom: 6px;
-    background: rgba(0, 0, 0, .65);
+    background: rgba(0,0,0,.6);
     color: #fff;
     font-size: 11px;
-    line-height: 1;
-    padding: 3px 5px;
-    border-radius: 4px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    z-index: 1;
   }
-  .card:hover .thumb img { transform: scale(1.03); }
-  .card:hover .title { color: var(--pink); }
+  .thumb-stats {
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    display: flex;
+    gap: 8px;
+    color: #fff;
+    font-size: 12px;
+    z-index: 1;
+  }
+  .stat-item { display: flex; align-items: center; gap: 3px; }
+  .stat-item svg { flex-shrink: 0; }
+  .card-body { padding: 8px 2px 6px; }
+  .title {
+    font-size: 14px;
+    line-height: 1.4;
+    height: 2.8em;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    color: var(--text);
+    margin: 0 0 6px;
+  }
+  .author {
+    font-size: 12px;
+    color: var(--text-3);
+    margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .author svg { flex-shrink: 0; color: var(--text-3); }
+  .author span { overflow: hidden; text-overflow: ellipsis; }
   /* 历史记录播放进度条：缩略图底部一条粉色进度 */
   .prog-track {
     position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
     background: rgba(0, 0, 0, .38);
+    z-index: 1;
   }
   .prog-fill { display: block; height: 100%; background: #FB7299; }
-  .title {
-    font-size: 14px; line-height: 1.4; margin: 8px 0 4px;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-    overflow: hidden; color: var(--text);
-  }
-  .meta { font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .more-wrap { text-align: center; margin-top: 22px; }
 
   .chips, .fav-list { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
@@ -438,6 +525,7 @@
   }
   :root[data-theme="dark"] .hero-name { color: var(--text); }
   :root[data-theme="dark"] .hero-sign { color: var(--text-2); }
+  :root[data-theme="dark"] .thumb-wrap { background: #2a2e33; }
   :root[data-theme="dark"] .stat-num { color: var(--text); }
   :root[data-theme="dark"] .stat-label { color: var(--text-3); }
   :root[data-theme="dark"] .btn:not(.primary):not(.followed) { background: var(--card); color: var(--text); border-color: var(--border); }
@@ -620,28 +708,40 @@ function applyHeaderLogin(m) {
   cur.replaceWith(a);
 }
 
-// ============ 视频卡片 ============
+// ============ 视频卡片（与 search.html 同款） ============
+const CARD_PLAY_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="4" width="20" height="16" rx="4" stroke="currentColor" stroke-width="1.6"/><path d="M4 4.5C4 3.6 4.99 3.05 5.75 3.52L19.5 12L5.75 20.48C4.99 20.95 4 20.4 4 19.5V4.5Z" fill="currentColor" transform="translate(6.6,6) scale(0.5)"/></svg>`;
+const CARD_DM_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="4" width="20" height="16" rx="4" stroke="currentColor" stroke-width="1.6"/><line x1="6" y1="9.5" x2="15" y2="9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="6" y1="14.5" x2="18" y2="14.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
+const CARD_UP_SVG = `<svg width="16" height="13" viewBox="0 0 24 20" xmlns="http://www.w3.org/2000/svg"><rect x="0.5" y="0.5" width="23" height="19" rx="4" fill="none" stroke="currentColor" stroke-width="1.3"/><text x="12" y="14" text-anchor="middle" font-size="10" font-weight="700" fill="currentColor" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif">UP</text></svg>`;
+
 function card(v, o = {}) {
-  const meta = [];
-  if (o.author !== false && v.author) meta.push(esc(v.author));
-  if (v.play != null) meta.push(Number(v.play).toLocaleString() + '播放');
-  if (o.date && v.pubdate) meta.push(fmtDate(v.pubdate));
-  // 历史记录：progress 是上次看到第几秒（-1=看完），显示进度条 + "看到位置 / 总时长"
-  const progPct = v.progress > 0 && v.duration > 0
-    ? Math.min(100, (v.progress / v.duration) * 100) : null;
+  // 历史记录：progress 是上次看到第几秒（-1 = 看完 → 满条），显示进度条 + "看到位置 / 总时长"
+  const finished = v.progress < 0;
+  const progPct = finished
+    ? 100
+    : (v.progress > 0 && v.duration > 0 ? Math.min(100, (v.progress / v.duration) * 100) : null);
   const durText = v.duration > 0
     ? (v.progress > 0 ? `${fmtDur(v.progress)} / ${fmtDur(v.duration)}` : fmtDur(v.duration))
     : '';
-  const dur = v.duration > 0 ? `<span class="dur">${durText}</span>` : '';
+  const dur = v.duration > 0 ? `<span class="duration">${durText}</span>` : '';
   const progBar = progPct != null
     ? `<span class="prog-track"><span class="prog-fill" style="width:${progPct.toFixed(1)}%"></span></span>` : '';
+  // 缩略图角标：播放量 / 弹幕数（历史记录的 cursor 接口不返回播放量，留空）
+  const stats = [];
+  if (v.play != null) stats.push(`<span class="stat-item">${CARD_PLAY_SVG}${fmtCount(v.play)}</span>`);
+  if (v.danmaku != null) stats.push(`<span class="stat-item">${CARD_DM_SVG}${fmtCount(v.danmaku)}</span>`);
+  const datePart = o.date && v.pubdate ? ` · ${fmtDate(v.pubdate)}` : '';
+  const authorLine = (o.author !== false && v.author)
+    ? `<div class="author">${CARD_UP_SVG}<span>${esc(v.author)}</span>${datePart}</div>`
+    : (datePart ? `<div class="author">${esc(fmtDate(v.pubdate))}</div>` : '');
   // 跳转续播：分 P 带 p 参数，未看完带 t 参数（秒）
   const pageAttr = v.page && v.page > 1 ? ` data-page="${esc(v.page)}"` : '';
   const tAttr = v.progress > 0 ? ` data-t="${Math.floor(v.progress)}"` : '';
   return `<div class="card" data-bvid="${esc(v.bvid)}"${pageAttr}${tAttr}>
-    <div class="thumb"><img src="${esc(v.pic || '')}" referrerpolicy="no-referrer" loading="lazy">${dur}${progBar}</div>
-    <div class="title">${esc(v.title || '')}</div>
-    <div class="meta">${meta.join(' · ')}</div>
+    <div class="thumb-wrap"><img src="${esc(v.pic || '')}" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.opacity=0"><span class="thumb-stats">${stats.join('')}</span>${dur}${progBar}</div>
+    <div class="card-body">
+      <p class="title" title="${esc(v.title || '')}">${esc(v.title || '')}</p>
+      ${authorLine}
+    </div>
   </div>`;
 }
 
@@ -785,6 +885,24 @@ function activateTab(key) {
   ({ videos: loadVideos, history: loadHistory, fav: loadFavs, following: loadRelList, follower: loadRelList })[key]();
 }
 
+// 等级经验条（Lv.x 徽章右侧）。经验数据只有 /api/me（nav 接口）返回，
+// 查看他人主页时没有 current_exp/next_exp，就不渲染进度条。
+function levelExpHTML(u) {
+  const e = u.levelExp;
+  if (u.level == null || !e || e.current == null || e.next == null) return '';
+  const min = Number(e.min) || 0;
+  const cur = Number(e.current) || 0;
+  const next = Number(e.next) || 0;
+  if (next <= 0 || next <= min) return '<span class="level-exp"><span class="level-exp-text">已满级</span></span>';
+  const span = next - min;
+  const pct = Math.min(100, Math.max(0, ((cur - min) / span) * 100));
+  const remain = Math.max(0, next - cur);
+  return `<span class="level-exp" title="本级经验 ${fmtCount(cur - min)} / ${fmtCount(span)}，距 Lv.${Number(u.level) + 1} 还需 ${fmtCount(remain)}">
+    <span class="level-exp-bar"><span class="level-exp-fill" style="width:${pct.toFixed(1)}%"></span></span>
+    <span class="level-exp-text">${fmtCount(remain)}</span>
+  </span>`;
+}
+
 function renderProfile(u, isSelf) {
   ctx = { mid: Number(u.mid), isSelf, profile: u };
   const name = u.uname || 'B站用户';
@@ -806,6 +924,7 @@ function renderProfile(u, isSelf) {
       <span class="hero-name">${esc(name)}</span>
       <span class="hero-badges">
         ${u.level != null ? `<span class="badge level">Lv.${esc(u.level)}</span>` : ''}
+        ${levelExpHTML(u)}
         ${u.vipStatus ? '<span class="badge">大会员</span>' : ''}
       </span>
       ${u.sign ? `<div class="hero-sign">${esc(u.sign)}</div>` : ''}

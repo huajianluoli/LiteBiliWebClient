@@ -546,7 +546,7 @@
         .player-actions.pa-pressing .pa-ring circle {
             opacity: 1;
             stroke-dashoffset: 0;
-            transition: stroke-dashoffset 1s linear, opacity .1s ease;
+            transition: stroke-dashoffset .5s linear, opacity .1s ease;
         }
         .player-actions.pa-done .pa-ring circle {
             opacity: 0;
@@ -1740,16 +1740,21 @@
 
         let currentPage = 1;
 
-        // 登录后把直链播放器的播放进度同步回 B 站历史。
-        let historyState = { aid: 0, cid: 0, lastSent: 0, finished: false };
+        // 登录后把直链播放器的播放进度同步回 B 站历史。触发时机参考 pilipawa：
+        // 元数据加载完立即上报一次（心跳就是历史记录的写入点：第一次上报把视频写进
+        // 历史列表，之后每次上报更新 played_time），播放中每 15s 定时上报，
+        // 暂停/看完/切后台/关页面/站内切视频时各补报一次。未登录时上报无效，直接跳过。
+        let historyState = { aid: 0, cid: 0 };
+        let heartbeatTimer = null; // 播放中定时上报的 setInterval 句柄
+        const HEARTBEAT_INTERVAL_MS = 15000;
 
-        async function sendHistoryHeartbeat(finished = false) {
-            if (!historyState.aid || !historyState.cid || !art || !art.video) return;
-            const t = Math.floor(art.video.currentTime || 0);
-            if (!finished && t <= 0) return;
-            if (!finished && t - historyState.lastSent < 15) return;
-            historyState.lastSent = t;
+        function stopHeartbeatTimer() {
+            if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+        }
 
+        async function sendHistoryHeartbeat(playedTime, keepalive = false) {
+            if (!historyState.aid || !historyState.cid || !art) return;
+            const t = Math.max(0, Math.floor(playedTime || 0));
             try {
                 await fetch('/api/history/heartbeat', {
                     method: 'POST',
@@ -1758,9 +1763,8 @@
                         aid: historyState.aid,
                         cid: historyState.cid,
                         played_time: t,
-                        finished: finished
                     }),
-                    keepalive: finished
+                    keepalive,
                 });
             } catch (e) {}
         }
@@ -2275,9 +2279,9 @@
         }
 
         /* ----------------------------- 长按点赞：一键三连 ----------------------------- */
-        // 按住点赞按钮 1 秒：三个按钮同时出现进度环；走满后依次 点赞 → 投币补满 2 个 → 收藏到默认收藏夹。
-        // 中途松手 = 取消三连；快速点按 = 普通点赞/取消赞。已点赞/已投币/已收藏的项会自动跳过，不会重复消耗。
-        const TRIPLE_HOLD_MS = 1000;
+        // 按住 0.5s 后三个按钮才出现进度环；环走满 0.5s 后触发一键三连（总计 1s）。
+        // 0.5s 内松手 = 普通点赞/取消赞；进入三连后松手 = 取消三连。
+        // 三连走官方组合接口 like/triple：一次请求同时 点赞 + 投币(默认2枚) + 收藏到默认收藏夹。
 
         async function doTriple() {
             if (!currentAid) return;
@@ -2286,78 +2290,49 @@
                 setTimeout(() => location.href = '/account', 1200);
                 return;
             }
-            const done = [];
-            const failed = [];
-            const needLogin = (d) => d && (d.code === -101 || d.code === -111);
-            const post = async (url, payload) => {
-                const res = await fetch(url, {
+            try {
+                const res = await fetch('/api/video/triple', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
+                    body: JSON.stringify({ aid: currentAid, bvid: currentBvid }),
                 });
-                const data = await res.json().catch(() => ({}));
-                return { ok: res.ok, data };
-            };
-
-            // 1) 点赞
-            if (!videoRelation.liked) {
-                try {
-                    const r = await post('/api/video/like', { aid: currentAid, bvid: currentBvid, like: true });
-                    if (r.ok) {
-                        videoRelation.liked = true;
-                        videoStat.like = (videoStat.like || 0) + 1;
-                        done.push('点赞');
-                    } else {
-                        if (needLogin(r.data)) { setTimeout(() => location.href = '/account', 1500); }
-                        failed.push('点赞：' + (r.data.error || '失败'));
+                const r = await res.json().catch(() => ({}));
+                if (r.code === -101 || r.code === -111) {
+                    showToast('登录已失效，请重新扫码登录');
+                    setTimeout(() => location.href = '/account', 1500);
+                    return;
+                }
+                if (!res.ok) {
+                    showToast(r.error || '一键三连失败');
+                    return;
+                }
+                // 按接口返回的 like/coin/fav 布尔值更新本地展示；计数只对本地尚未完成的项累加，
+                // 随后 loadVideoRelation() 以服务端真实状态兜底校正。
+                const d = r.data || {};
+                const done = [];
+                if (d.like && !videoRelation.liked) {
+                    videoRelation.liked = true;
+                    videoStat.like = (videoStat.like || 0) + 1;
+                    done.push('点赞');
+                }
+                if (d.coin) {
+                    const add = Math.max(0, Math.min(2, d.multiply || 2) - (videoRelation.coin || 0));
+                    if (add > 0) {
+                        videoRelation.coin = (videoRelation.coin || 0) + add;
+                        videoStat.coin = (videoStat.coin || 0) + add;
+                        done.push('投币×' + add);
                     }
-                } catch (e) { failed.push('点赞：网络异常'); }
-            }
-
-            // 2) 投币：补满到 2 个（还没投过 → 一次投 2 个；已投 1 个 → 补投 1 个；已投满 → 跳过）
-            const coinToAdd = Math.max(0, 2 - (videoRelation.coin || 0));
-            if (coinToAdd > 0) {
-                try {
-                    const r = await post('/api/video/coin', {
-                        aid: currentAid, bvid: currentBvid, multiply: coinToAdd, select_like: false,
-                    });
-                    if (r.ok) {
-                        videoRelation.coin = (videoRelation.coin || 0) + coinToAdd;
-                        videoStat.coin = (videoStat.coin || 0) + coinToAdd;
-                        done.push('投币×' + coinToAdd);
-                    } else {
-                        failed.push('投币：' + (r.data.error || '失败'));
-                    }
-                } catch (e) { failed.push('投币：网络异常'); }
-            }
-
-            // 3) 收藏（放进第一个收藏夹，也就是默认收藏夹）
-            if (!videoRelation.favorite) {
-                try {
-                    const fr = await fetch('/api/video/fav/folders?aid=' + currentAid);
-                    const fd = await fr.json();
-                    if (!fr.ok) throw new Error(fd.error || '获取收藏夹失败');
-                    const target = (fd.list || []).find(f => !f.checked) || (fd.list || [])[0];
-                    if (!target) throw new Error('还没有收藏夹');
-                    if (target.checked) {
-                        videoRelation.favorite = true;
-                    } else {
-                        const r = await post('/api/video/fav/toggle', {
-                            aid: currentAid, folder_id: target.id, checked: true,
-                        });
-                        if (!r.ok) throw new Error(r.data.error || '失败');
-                        videoRelation.favorite = true;
-                        videoStat.favorite = (videoStat.favorite || 0) + 1;
-                        done.push('收藏');
-                    }
-                } catch (e) { failed.push('收藏：' + (e.message || '失败')); }
-            }
-
-            renderPlayerActions();
-            if (!failed.length) {
+                }
+                if (d.fav && !videoRelation.favorite) {
+                    videoRelation.favorite = true;
+                    videoStat.favorite = (videoStat.favorite || 0) + 1;
+                    done.push('收藏');
+                }
+                renderPlayerActions();
+                loadVideoRelation();
                 showToast(done.length ? '一键三连成功！' : '已经三连过啦');
-            } else {
-                showToast((done.length ? '已' + done.join('、') + '；' : '') + failed.join('；'));
+            } catch (e) {
+                showToast('一键三连失败（网络异常）');
             }
         }
 
@@ -2365,14 +2340,20 @@
             const box = document.getElementById('playerActions');
             const likeBtn = document.getElementById('likeActionBtn');
             if (!box || !likeBtn) return;
-            let timer = null;
+            // 两段式：前 0.5s 完全静默（单击/短按在此窗口松手=普通点赞，不出现进度环）；
+            // 按住超过 0.5s 才出进度环并开始抖动，环走 0.5s 走满后触发一键三连（总计 1s）。
+            const PRESS_DELAY_MS = 500;
+            const RING_MS = 500;
+            let delayTimer = null;
+            let ringTimer = null;
             let fired = false;
             let pressing = false;
+            let inRing = false;
 
-            // 按住期间：每个按钮的图标和数字随机小幅抖动（上下左右），圆环轨道本身不动
+            // 按住期间：SVG 图标小幅随机抖动（上下左右）增加手感；数字保持稳定不抖
             const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
             let shakeTimer = null;
-            const shakeTargets = () => box.querySelectorAll('.pa-svg, .pa-count');
+            const shakeTargets = () => box.querySelectorAll('.pa-svg');
             const startShake = () => {
                 if (reduceMotion) return;
                 stopShake();
@@ -2390,9 +2371,12 @@
             };
 
             const cancel = () => {
-                clearTimeout(timer);
-                timer = null;
+                clearTimeout(delayTimer);
+                clearTimeout(ringTimer);
+                delayTimer = null;
+                ringTimer = null;
                 pressing = false;
+                inRing = false;
                 box.classList.remove('pa-pressing');
                 stopShake();
             };
@@ -2403,25 +2387,33 @@
                 pressing = true;
                 fired = false;
                 box.classList.remove('pa-done');
-                box.classList.add('pa-pressing');
-                startShake();
-                timer = setTimeout(() => {
-                    timer = null;
-                    fired = true;
-                    pressing = false;
-                    box.classList.remove('pa-pressing');
-                    stopShake();
-                    box.classList.add('pa-done');
-                    setTimeout(() => box.classList.remove('pa-done'), 600);
-                    doTriple();
-                }, TRIPLE_HOLD_MS);
+                // 静默等待窗口：0.5s 内松手 = 普通点击，不出现任何进度环
+                delayTimer = setTimeout(() => {
+                    delayTimer = null;
+                    if (!pressing) return;
+                    inRing = true;
+                    box.classList.add('pa-pressing');
+                    startShake();
+                    ringTimer = setTimeout(() => {
+                        ringTimer = null;
+                        fired = true;
+                        pressing = false;
+                        inRing = false;
+                        box.classList.remove('pa-pressing');
+                        stopShake();
+                        box.classList.add('pa-done');
+                        setTimeout(() => box.classList.remove('pa-done'), 600);
+                        doTriple();
+                    }, RING_MS);
+                }, PRESS_DELAY_MS);
             });
 
             likeBtn.addEventListener('pointerup', () => {
                 if (!pressing) return;          // 已触发三连 / 已取消
-                const wasShortPress = timer !== null;
+                const wasShortPress = delayTimer !== null;   // 0.5s 静默期内松手
                 cancel();
-                if (wasShortPress) doLike();    // 没按够 1 秒：当作普通点击
+                if (wasShortPress) doLike();    // 没按住 0.5s：当作普通点击
+                // 已进入三连模式（环已出现）后松手 = 取消三连，不触发点赞
             });
             likeBtn.addEventListener('pointerleave', cancel);
             likeBtn.addEventListener('pointercancel', cancel);
@@ -2556,7 +2548,7 @@
                 <div class="sub-reply">
                     <span class="sub-reply-user">${userLinkHTML(sub.mid, sub.uname)}:</span>
                     <span class="sub-reply-text comment-text" data-rpid="${sub.rpid}" data-uname="${esc(sub.uname)}">${renderCommentContent(sub)}</span>
-                    <button class="sub-reply-like-btn${sub.liked ? ' active' : ''}" data-rpid="${sub.rpid}" data-liked="${sub.liked ? '1' : '0'}">
+                    <button class="sub-reply-like-btn${sub.liked ? ' active' : ''}" data-rpid="${sub.rpid}" data-liked="${sub.liked ? '1' : '0'}" data-like="${sub.like ?? 0}">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3Zm0 0l4.5-8a2 2 0 0 1 3.5 1.5V9h4.2a2 2 0 0 1 1.97 2.3l-1.1 7A2 2 0 0 1 18.1 20H10a3 3 0 0 1-3-3v-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
                         </svg>
@@ -2591,7 +2583,7 @@
                         <div class="comment-user">${userLinkHTML(item.mid, item.uname)}</div>
                         <div class="comment-text" data-rpid="${item.rpid}" data-uname="${esc(item.uname)}">${renderCommentContent(item)}</div>
                         <div class="comment-meta">
-                            <button class="comment-like-btn${item.liked ? ' active' : ''}" data-rpid="${item.rpid}" data-liked="${item.liked ? '1' : '0'}">
+                            <button class="comment-like-btn${item.liked ? ' active' : ''}" data-rpid="${item.rpid}" data-liked="${item.liked ? '1' : '0'}" data-like="${item.like ?? 0}">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3Zm0 0l4.5-8a2 2 0 0 1 3.5 1.5V9h4.2a2 2 0 0 1 1.97 2.3l-1.1 7A2 2 0 0 1 18.1 20H10a3 3 0 0 1-3-3v-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
                                 </svg>
@@ -2613,7 +2605,9 @@
             const wasLiked = btn.dataset.liked === '1';
             const nextLiked = !wasLiked;
             const countEl = btn.querySelector('.comment-like-count-num, .sub-reply-like-count');
-            const prevCount = countEl ? countEl.textContent : '';
+            // 数值计数必须取原始数字（渲染时存在 data-like 上）。不能 parseInt 显示文本：
+            // "1.5万" 会被 parseInt 截成 1，点赞后就变成 "2"。
+            const rawPrev = parseInt(btn.dataset.like, 10) || 0;
             try {
                 const res = await fetch('/api/comments/like', {
                     method: 'POST',
@@ -2624,9 +2618,10 @@
                 if (!res.ok) throw new Error(data.error || '操作失败');
                 btn.dataset.liked = nextLiked ? '1' : '0';
                 btn.classList.toggle('active', nextLiked);
-                const rawPrev = parseInt(prevCount, 10);
-                if (!isNaN(rawPrev) && countEl) {
-                    countEl.textContent = formatRelatedCount(rawPrev + (nextLiked ? 1 : -1));
+                if (countEl) {
+                    const newCount = Math.max(0, rawPrev + (nextLiked ? 1 : -1));
+                    btn.dataset.like = String(newCount);
+                    countEl.textContent = formatRelatedCount(newCount);
                 }
             } catch (err) {
                 alert(err.message || '点赞失败,请先登录 B 站账号');
@@ -3428,10 +3423,22 @@
                 ['pointerup', 'change', 'input'].forEach((ev) => dmRoot.addEventListener(ev, scheduleSnapshot));
             }
 
-            if (art.video) {
-                art.video.addEventListener('timeupdate', () => sendHistoryHeartbeat(false));
-                art.video.addEventListener('ended', () => sendHistoryHeartbeat(true));
-            }
+            // 播放心跳：元数据加载完先报一次（把视频写进历史记录），播放中每 15s 一次；
+            // 暂停/看完时补报并停掉定时器，避免把进度报给下一个视频
+            stopHeartbeatTimer();
+            art.on('video:loadedmetadata', () => sendHistoryHeartbeat(art.currentTime));
+            art.on('video:play', () => {
+                stopHeartbeatTimer();
+                heartbeatTimer = setInterval(() => sendHistoryHeartbeat(art.currentTime), HEARTBEAT_INTERVAL_MS);
+            });
+            art.on('video:pause', () => {
+                stopHeartbeatTimer();
+                sendHistoryHeartbeat(art.currentTime);
+            });
+            art.on('video:ended', () => {
+                stopHeartbeatTimer();
+                sendHistoryHeartbeat(art.duration || art.currentTime);
+            });
         }
 
         // 切换清晰度：带 qn 重新请求 /api/play，重建播放器后尽量还原到原来的播放进度/播放状态
@@ -3868,6 +3875,10 @@
             const p = currentPage || 1;
             // 换视频后旧 rpid 失效，清掉避免把上一条评论置顶到新视频里
             myCommentRpid = '';
+            // 站内切视频前补报上一个视频的进度并停掉旧定时器：页面不会卸载，
+            // 不能依赖 beforeunload；不补报会丢进度，不停定时器会用新 aid/cid 误报（参考 pilipawa）
+            if (art && !art.paused) sendHistoryHeartbeat(art.currentTime, true);
+            stopHeartbeatTimer();
 
             if (!input) {
                 alert('请输入有效的视频号！');
@@ -3965,8 +3976,6 @@
                         historyState = {
                             aid: Number(jsonData.aid || 0),
                             cid: Number(jsonData.cid || 0),
-                            lastSent: 0,
-                            finished: false
                         };
                         const danmakuList = await fetchDanmaku(jsonData.cid);
                         initPlayer(jsonData, danmakuList);
@@ -4021,8 +4030,15 @@
             }
         })();
 
-        window.addEventListener('pagehide', () => {
-            sendHistoryHeartbeat(false);
+        // 页面隐藏(切后台/切标签页)或即将卸载(关页面/刷新)时，播放中则补报一次当前进度，
+        // 避免刚好卡在两次定时上报之间的那段进度丢失；keepalive 确保请求不被页面关闭中断
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden' && art && !art.paused) {
+                sendHistoryHeartbeat(art.currentTime, true);
+            }
+        });
+        window.addEventListener('beforeunload', () => {
+            if (art && !art.paused) sendHistoryHeartbeat(art.currentTime, true);
         });
     </script>
 <script src="/msg-badge.js" defer></script>
