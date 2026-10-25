@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<script src="/auth.js"></script>
+<script>(function(){try{var isP=/\/(player|stream)/.test(location.pathname);var k=isP?'bili_player_theme':'bili_theme';var d=isP?'dark':'light';var t=localStorage.getItem(k)||d;if(t!=='dark'&&t!=='light')t=d;document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>图文 - B站视频搜索器</title>
+<style>
+  :root {
+    --pink: #FB7299;
+    --blue: #00A1D6;
+    --bg: #F1F2F3;
+    --card: #FFFFFF;
+    --text: #18191C;
+    --text-2: #61666D;
+    --text-3: #9499A0;
+    --border: #E3E5E7;
+    --header-h: 64px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--card); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif; }
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; }
+
+  /* ============ 顶栏（同其它页面，无搜索框） ============ */
+  .site-header { position: sticky; top: 0; z-index: 100; height: var(--header-h); background: var(--card); color: var(--text); box-shadow: 0 1px 8px rgba(0,0,0,.06); }
+  .header-inner { max-width: 1400px; height: 100%; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; gap: 20px; }
+  .logo { display: flex; align-items: center; flex-shrink: 0; user-select: none; color: var(--pink); }
+  .logo-svg { display: block; height: 28px; width: auto; }
+  .top-nav { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .top-nav-item { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border: none; background: none; border-radius: 8px; color: inherit; font-size: 14px; font-weight: 500; cursor: pointer; transition: background .15s ease; opacity: .9; }
+  .top-nav-item:hover { background: rgba(0,0,0,.05); opacity: 1; }
+  .user-actions { margin-left: auto; display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .user-icon { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 0; border: none; background: none; border-radius: 50%; color: inherit; cursor: pointer; transition: background .15s ease; position: relative; }
+  .user-icon:hover { background: rgba(0,0,0,.05); }
+  .user-icon.active { color: var(--pink); }
+  .user-icon svg { display: block; }
+  .login-btn { height: 34px; padding: 0 16px; border-radius: 17px; background: var(--pink); color: #fff; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+  .avatar-btn { width: 34px; height: 34px; border-radius: 50%; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; background: var(--bg); color: var(--text-2); font-weight: 600; font-size: 14px; }
+  .avatar-btn img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  /* ============ 图文详情 ============ */
+  .op-wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 80px; }
+  .op-title { margin: 0 0 14px; font-size: 26px; font-weight: 700; line-height: 1.4; word-break: break-all; }
+  .op-author { display: flex; align-items: center; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .op-avatar { width: 44px; height: 44px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: var(--bg); }
+  .op-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .op-name { font-size: 15px; font-weight: 600; }
+  .op-name:hover { color: var(--pink); }
+  .op-time { margin-top: 3px; font-size: 12px; color: var(--text-3); }
+  .op-orig { margin-left: auto; font-size: 13px; color: var(--blue); white-space: nowrap; }
+  .op-orig:hover { text-decoration: underline; }
+  .op-body { padding: 18px 0 8px; font-size: 16px; line-height: 1.85; }
+  .op-body p { margin: 0 0 16px; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+  .op-body a { color: var(--blue); }
+  .op-body a:hover { text-decoration: underline; }
+  .op-body blockquote { margin: 0 0 16px; padding: 4px 0 4px 14px; border-left: 3px solid var(--border); color: var(--text-2); white-space: pre-wrap; }
+  .op-body ul { margin: 0 0 16px; padding-left: 22px; }
+  .op-body hr { border: none; border-top: 1px solid var(--border); margin: 22px 0; }
+  .op-pics { display: flex; flex-direction: column; gap: 10px; margin: 0 0 16px; }
+  .op-pic { padding: 0; border: none; background: var(--bg); border-radius: 8px; overflow: hidden; cursor: zoom-in; display: block; }
+  .op-pic img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  .dy-emote { height: 22px; width: auto; vertical-align: -5px; margin: 0 1px; }
+  .op-foot { display: flex; align-items: center; gap: 6px; padding: 10px 0 14px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+  .op-stat { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px 6px 0; margin-right: 12px; border: none; background: none; color: var(--text-3); font-size: 14px; cursor: pointer; }
+  .op-stat svg { width: 20px; height: 20px; display: block; }
+  .op-stat:hover, .op-stat.active { color: var(--pink); }
+  .op-stat.active svg path { fill: currentColor; }
+  .op-stat.busy { opacity: .5; pointer-events: none; }
+  /* 投币弹窗 */
+  .coin-mask { position: fixed; inset: 0; z-index: 1100; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; }
+  .coin-dialog { position: relative; background: var(--card); color: var(--text); border-radius: 12px; width: min(320px, calc(100vw - 48px)); padding: 22px 22px 14px; box-shadow: 0 12px 40px rgba(0,0,0,.2); }
+  .coin-close { position: absolute; right: 10px; top: 8px; width: 32px; height: 32px; border: none; background: none; color: var(--text-3); font-size: 22px; line-height: 1; cursor: pointer; border-radius: 50%; }
+  .coin-close:hover { color: var(--text); background: rgba(0,0,0,.05); }
+  .coin-title { text-align: center; font-size: 16px; font-weight: 600; margin: 4px 0 16px; }
+  .coin-title .coin-num { color: var(--pink); font-size: 24px; margin: 0 4px; vertical-align: -2px; }
+  .coin-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .coin-card { position: relative; height: 64px; border: 2px solid var(--border); border-radius: 10px; background: none; color: var(--text-2); font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .coin-card svg { width: 22px; height: 22px; }
+  .coin-card:hover { color: var(--text); }
+  .coin-card.selected { border-color: var(--pink); color: var(--pink); }
+  .coin-card.disabled { opacity: .35; cursor: not-allowed; }
+  .coin-like { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 13px; color: var(--text-2); cursor: pointer; user-select: none; }
+  .coin-like input { width: 16px; height: 16px; accent-color: var(--pink); }
+  .coin-footer { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .coin-ok { width: 100%; height: 38px; border: none; border-radius: 19px; background: var(--pink); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .coin-ok:disabled { opacity: .6; cursor: default; }
+  .coin-ok:hover:not(:disabled) { filter: brightness(.94); }
+  .op-state { padding: 80px 0; text-align: center; color: var(--text-3); font-size: 14px; }
+  .op-state a { color: var(--blue); }
+  .bvid-toast { position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%) translateY(20px); background: rgba(24,25,28,.9); color: #fff; font-size: 14px; padding: 10px 18px; border-radius: 8px; z-index: 1200; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; white-space: nowrap; }
+  .bvid-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  @media (max-width: 640px) {
+    :root { --header-h: 56px; }
+    .header-inner { padding: 0 14px; gap: 10px; }
+    .logo-svg { height: 24px; }
+    .user-actions .user-icon:not(.always-show) { display: none; }
+    .op-wrap { padding: 16px 12px 70px; }
+    .op-title { font-size: 21px; }
+  }
+
+  /* ============ 深色模式 ============ */
+  :root[data-theme="dark"] { --bg: #141414; --card: #1f2022; --text: #e6e6e8; --text-2: #9a9da3; --text-3: #6f7278; --border: #2c2d30; }
+  :root[data-theme="dark"] .top-nav-item:hover, :root[data-theme="dark"] .user-icon:hover { background: rgba(255,255,255,.08); }
+  :root[data-theme="dark"] .avatar-btn { background: var(--card); }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a class="logo" href="/search" title="首页" aria-label="bilibili">
+      <svg class="logo-svg" viewBox="0 0 52 24" xmlns="http://www.w3.org/2000/svg">
+        <path fill="currentColor" fill-rule="evenodd" d="M46.573 20.632c-.215 0-.398.017-.577-.004-.364-.042-.729-.034-1.093-.044-.236-.007-.229-.007-.248-.235-.059-.696-.123-1.392-.185-2.088-.054-.611-.105-1.223-.165-1.834-.054-.56-.12-1.117-.178-1.676-.057-.526-.109-1.052-.167-1.576-.074-.66-.15-1.32-.23-1.98-.07-.583-.14-1.168-.218-1.75-.122-.903-.248-1.805-.376-2.707a79.498 79.498 0 00-.474-2.873c-.03-.171-.026-.177.137-.205.679-.116 1.361-.215 2.052-.2.074.002.15.004.224.013.121.015.184.074.191.216.024.494.059.987.095 1.48.058.808.121 1.616.181 2.423.039.52.072 1.038.11 1.557.063.833.13 1.666.192 2.499.039.51.072 1.02.111 1.53.06.748.125 1.495.186 2.242.038.476.072.952.113 1.428.06.705.124 1.41.185 2.114.046.55.087 1.102.134 1.67zM20.291 3.468c.1 0 .25-.011.398.002.188.018.224.066.236.256.054.868.105 1.736.163 2.605.063.936.132 1.871.201 2.806.064.859.128 1.717.196 2.576.075.943.158 1.885.233 2.829.058.722.106 1.445.165 2.168.056.671.122 1.34.183 2.011.05.577.103 1.154.153 1.732.016.183.003.195-.194.19-.515-.013-1.027-.073-1.542-.059-.118.004-.152-.05-.172-.163-.043-.244-.036-.492-.062-.739-.07-.652-.111-1.307-.17-1.961-.054-.594-.119-1.187-.18-1.78-.054-.543-.107-1.085-.165-1.628-.058-.533-.119-1.067-.179-1.6-.055-.491-.11-.982-.169-1.473-.087-.719-.173-1.438-.268-2.156-.087-.659-.185-1.315-.278-1.973a77.866 77.866 0 00-.425-2.674 30.006 30.006 0 00-.114-.602c-.02-.101-.002-.16.113-.175.303-.041.605-.104.91-.134.304-.028.609-.085.967-.058zm21.565 8.668c.58 0 .594.004.687.527.115.646.195 1.297.271 1.948.08.694.161 1.387.235 2.082.06.559.11 1.12.166 1.678.06.586.122 1.17.183 1.755.033.33.065.661.102.991.011.096-.017.146-.111.157-.199.023-.395.05-.593.07-.362.04-.725.078-1.087.112-.188.017-.2.007-.235-.175-.318-1.646-.637-3.291-.952-4.939-.21-1.095-.414-2.19-.62-3.286-.028-.15-.053-.302-.077-.453-.014-.087.01-.143.108-.166.653-.153 1.313-.271 1.923-.301zm-24.373 0c.62 0 .618.002.714.567.148.873.253 1.752.347 2.633.091.856.192 1.71.282 2.565.06.586.108 1.172.165 1.756.04.416.089.831.133 1.246.005.051.008.102.011.154.01.203 0 .22-.195.24-.387.04-.776.074-1.163.112-.14.014-.28.035-.42.048-.185.017-.191.017-.227-.17-.13-.66-.257-1.32-.384-1.98-.306-1.588-.615-3.175-.92-4.763-.12-.636-.225-1.274-.344-1.91-.022-.116-.006-.17.114-.198.648-.152 1.3-.27 1.887-.3zm8.19 6.66v2.665c0 .025-.002.051.002.077.012.13-.035.186-.168.18-.175-.007-.348-.002-.523.002-.365.007-.73-.008-1.095.034-.201.024-.197.011-.217-.202-.06-.67-.125-1.341-.186-2.012-.056-.62-.107-1.24-.164-1.86-.058-.637-.124-1.273-.183-1.91-.04-.424-.076-.848-.111-1.273-.047-.553-.09-1.105-.139-1.658-.02-.233-.003-.266.227-.29a11.356 11.356 0 011.79-.056c.15.009.297.038.441.073.182.043.202.07.212.26.02.384.04.768.05 1.152.011.427.002.854.017 1.281.04 1.178.034 2.357.048 3.536zm24.325.12v2.524c0 .043-.001.085.001.129.009.11-.043.15-.147.149-.258-.002-.515 0-.772.003-.291.003-.581.002-.871.033-.192.022-.193.008-.21-.183l-.242-2.622c-.072-.807-.14-1.614-.213-2.421-.077-.833-.16-1.663-.234-2.495a84.78 84.78 0 01-.1-1.25c-.011-.182.008-.214.213-.23.355-.029.709-.077 1.067-.07.356.006.714-.014 1.068.054.3.058.316.075.333.397.052.947.036 1.896.07 2.843.034 1.008.01 2.016.037 3.14zm-8.747-11.36c.21.012.375.002.54.038.104.024.157.072.167.184.05.543.103 1.086.157 1.63.043.44.09.88.134 1.321l.004.026c.036.277.028.285-.242.3-.24.013-.48.034-.72.049-.157.01-.207.036-.233-.194-.09-.813-.194-1.623-.294-2.435a25.338 25.338 0 00-.092-.683c-.02-.13.03-.2.15-.21.158-.015.316-.019.429-.026zm-24.295.003c.162.01.329-.003.492.034.093.022.14.061.15.168.02.254.058.508.082.762.076.78.148 1.561.22 2.342.015.17.011.174-.147.185-.281.021-.563.042-.845.053-.164.008-.184-.012-.205-.18-.071-.575-.138-1.15-.207-1.726-.055-.474-.102-.948-.17-1.421-.018-.13.025-.167.129-.188.165-.034.331-.023.501-.029zm8.556 2.15v1.482c0 .222-.003.224-.224.221a6.928 6.928 0 01-.792-.041c-.17-.022-.174-.016-.179-.197-.017-.604-.035-1.209-.047-1.813-.009-.409-.014-.817-.038-1.226-.013-.21-.002-.213.2-.216.299-.003.597.01.893.056.178.028.186.028.187.226l.001 1.508h-.001zm24.337.012v1.484c0 .208-.004.21-.212.208a10.826 10.826 0 01-.817-.039c-.136-.01-.175-.067-.166-.19v-.052c-.02-.954-.042-1.908-.06-2.862-.001-.05-.004-.102-.002-.153.003-.193.003-.198.196-.196.265.001.529.015.793.041.323.032.266.072.268.328v1.431zm-33.559 1.16c.007.272.007.272-.253.335-.176.043-.352.09-.53.13-.151.034-.178.015-.204-.134l-.541-3.038c-.036-.21-.027-.222.179-.259.253-.044.505-.088.758-.128.161-.025.182-.016.214.162.064.36.124.72.172 1.083.073.573.133 1.149.2 1.723.005.042.003.085.005.127zM39.1 7.945c.331-.054.665-.11 1-.162.12-.019.156.057.171.164.057.396.129.79.175 1.186.069.575.163 1.147.18 1.726l.003.18c.003.091-.043.139-.128.159-.226.05-.453.102-.678.156-.108.026-.145-.02-.163-.126-.067-.403-.146-.804-.215-1.205-.117-.662-.231-1.324-.345-1.986-.003-.024 0-.05 0-.092zm-15.232 2.322c-.01.352.011.659-.037.965-.014.097-.042.16-.146.169-.224.018-.447.036-.67.059-.107.011-.137-.035-.155-.141-.05-.313-.04-.63-.071-.944-.057-.594-.081-1.191-.12-1.786-.009-.145-.023-.29-.035-.434-.006-.081.026-.127.112-.13.29-.012.578-.065.869-.054.17.006.184.017.196.189.008.119.006.239.009.359l.048 1.748zm24.326-.341c0 .41.005.82 0 1.23-.004.212-.028.23-.229.25-.199.018-.396.033-.594.054-.112.012-.164-.02-.171-.15-.029-.544-.068-1.088-.106-1.632-.03-.451-.063-.902-.094-1.352-.004-.052-.001-.103-.004-.154-.005-.09.022-.143.123-.146.281-.01.56-.064.843-.054.173.006.176.009.189.189.042.587.046 1.176.043 1.765zM15.46 17.249c.355.392.373.856.256 1.341-.118.486-.387.886-.713 1.245-.546.6-1.207 1.042-1.909 1.418a13.319 13.319 0 01-3.827 1.333 22.16 22.16 0 01-2.91.376c-.298.016-.595.03-.893.028-.216 0-.433.006-.648-.002-.184-.006-.21-.038-.225-.23-.056-.688-.103-1.377-.164-2.065-.072-.798-.155-1.595-.232-2.392-.056-.577-.105-1.155-.167-1.73-.071-.678-.151-1.355-.23-2.033-.07-.626-.14-1.252-.215-1.879-.084-.694-.171-1.386-.264-2.078-.09-.667-.185-1.333-.283-1.999-.16-1.095-.333-2.189-.521-3.28a69.862 69.862 0 00-.507-2.66c-.025-.118.01-.165.114-.208.992-.413 1.981-.833 2.973-1.248.184-.077.373-.141.57-.178.135-.025.17.003.166.14-.01.35.004.701-.03 1.05a3.478 3.478 0 00-.014.281c-.016 1.255-.03 2.51.002 3.766.03 1.1.087 2.199.15 3.298.05.868.122 1.736.197 2.602.072.849.16 1.697.244 2.546.015.161.03.176.213.152.36-.055.725-.085 1.09-.09 1.133-.003 2.248.153 3.35.415.966.23 1.904.536 2.804.963.446.212.872.457 1.26.767.133.105.251.225.363.351zm24.154-.206c.439.386.598.858.474 1.442-.104.482-.338.887-.651 1.25-.502.582-1.112 1.024-1.771 1.394-1.294.726-2.671 1.198-4.12 1.47-.79.15-1.587.262-2.389.334-.454.04-.91.088-1.419.057h-.595c-.116 0-.182-.037-.192-.175-.043-.603-.094-1.206-.148-1.81-.058-.636-.122-1.273-.182-1.91-.055-.584-.106-1.17-.165-1.756-.055-.551-.118-1.101-.178-1.652-.055-.517-.109-1.034-.17-1.55-.073-.626-.15-1.252-.228-1.877-.073-.584-.145-1.167-.222-1.75-.083-.625-.17-1.25-.261-1.873-.122-.81-.253-1.616-.382-2.423a70.147 70.147 0 00-.624-3.417c-.01-.05-.014-.102-.03-.15-.035-.11 0-.17.107-.212 1.054-.413 2.074-.912 3.138-1.305.139-.052.28-.11.43-.126.135-.013.169.009.156.153-.071.783-.03 1.57-.067 2.354-.03.64-.027 1.28.005 1.92.008.163.014.326.013.488-.009.768.032 1.536.07 2.304.051 1.014.124 2.026.2 3.038.053.731.124 1.46.192 2.19.037.4.076.8.125 1.197.027.219.038.22.253.192a7.627 7.627 0 011.14-.088 15.02 15.02 0 013.95.599c.874.249 1.725.56 2.529.995.362.193.702.427 1.012.697zM8.609 20.83c.496-.237 2.907-2.126 3.098-2.434-1.17-.506-2.344-.975-3.606-1.36l.508 3.794zm27.377-2.31c.061-.067.055-.119-.03-.156-.166-.076-.331-.157-.5-.227-.9-.369-1.805-.726-2.732-1.018-.081-.025-.164-.081-.268-.033l.5 3.728c.074.016.103-.018.136-.041.843-.62 1.69-1.233 2.5-1.9.136-.111.272-.224.394-.353z"/>
+      </svg>
+    </a>
+    <nav class="top-nav">
+      <a class="top-nav-item" href="/search">首页</a>
+      <a class="top-nav-item" href="/live">直播</a>
+    </nav>
+    <div class="user-actions" id="userActions">
+      <a class="login-btn" id="loginEntry" href="/account">登录</a>
+      <a class="user-icon" href="/dynamic" title="动态">
+        <svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <path id="icon-blade-dynamic2" d="M12,12 A5,5 0 0 1 12,2 Z"/>
+            <use href="#icon-blade-dynamic2" transform="rotate(90 12 12)"/>
+            <use href="#icon-blade-dynamic2" transform="rotate(180 12 12)"/>
+            <use href="#icon-blade-dynamic2" transform="rotate(270 12 12)"/>
+          </g>
+        </svg>
+      </a>
+      <a class="user-icon" href="/message" title="消息">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M4 7l8 5 8-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      <span class="nav-badge" id="navMsgBadge" style="display:none"></span></a>
+      <a class="user-icon" href="/account?tab=fav" title="收藏">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7L12 3.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+        </svg>
+      </a>
+      <a class="user-icon always-show" href="/player" title="播放器">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M10.3 8.5L15.8 12L10.3 15.5V8.5Z" fill="currentColor"/>
+        </svg>
+      </a>
+      <a class="user-icon" href="/settings" title="设置">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.5-2-3.5-2.4.6a7.4 7.4 0 0 0-1.7-1L14.8 3h-4l-.5 2.6a7.4 7.4 0 0 0-1.7 1l-2.4-.6-2 3.5L6.2 11a7.6 7.6 0 0 0 0 2l-2 1.5 2 3.5 2.4-.6a7.4 7.4 0 0 0 1.7 1l.5 2.6h4l.5-2.6a7.4 7.4 0 0 0 1.7-1l2.4.6 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+        </svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<div class="op-wrap" id="opWrap"><div class="op-state">正在加载图文…</div></div>
+<div class="bvid-toast" id="bvidToast"></div>
+
+<script src="/lightbox.js"></script>
+<script src="/dyn-comments.js"></script>
+<script>
+// ============ 登录凭证 / 设备 ID（与其它页面一致） ============
+let _credsMem = {};
+try { const raw = localStorage.getItem('bili_creds'); if (raw) _credsMem = JSON.parse(raw) || {}; } catch (e) {}
+function _cookieHeader() { return Object.keys(_credsMem || {}).map(k => `${k}=${_credsMem[k]}`).join('; '); }
+let _deviceId = '';
+try { _deviceId = localStorage.getItem('bili_device_id') || ''; if (!_deviceId) { _deviceId = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('bili_device_id', _deviceId); } } catch (e) {}
+const _origFetch = window.fetch.bind(window);
+window.fetch = (input, opts) => {
+  opts = opts || {};
+  const ch = _cookieHeader();
+  const setH = (k, v) => { if (opts.headers instanceof Headers) opts.headers.set(k, v); else opts.headers = Object.assign({}, opts.headers), opts.headers[k] = v; };
+  if (_deviceId) setH('X-Device-Id', _deviceId);
+  if (ch) setH('X-Bili-Cookie', ch);
+  return _origFetch(input, opts);
+};
+
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function faceUrl(f) { f = String(f || ''); return f.startsWith('//') ? 'https:' + f : f; }
+function fmtCount(n) {
+  n = Number(n) || 0;
+  if (n >= 100000000) return (n / 100000000).toFixed(1).replace(/\.0$/, '') + '亿';
+  if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, '') + '万';
+  return String(n);
+}
+let toastTimer = null;
+function showToast(text) {
+  const t = document.getElementById('bvidToast');
+  t.textContent = text; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
+}
+function absTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000), p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function applyHeaderLogin(m) {
+  const cur = document.getElementById('loginEntry');
+  if (!cur) return;
+  const a = document.createElement('a');
+  a.id = 'loginEntry'; a.href = '/account';
+  if (m.loggedIn && m.user) {
+    a.className = 'avatar-btn'; a.title = m.user.uname || '';
+    if (m.user.face) {
+      const img = document.createElement('img');
+      img.src = faceUrl(m.user.face); img.referrerPolicy = 'no-referrer'; img.alt = m.user.uname || '';
+      a.appendChild(img);
+    } else { a.textContent = (m.user.uname || '我').slice(0, 1); }
+  } else { a.className = 'login-btn'; a.textContent = '登录'; }
+  cur.replaceWith(a);
+}
+
+
+// 三个操作图标取自 player.html（点赞 36 / 硬币 28 / 星标 28），缩放到 20px 显示
+const IC_LIKE = '<svg viewBox="0 0 36 36" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M9.77234 30.8573V11.7471H7.54573C5.50932 11.7471 3.85742 13.3931 3.85742 15.425V27.1794C3.85742 29.2112 5.50932 30.8573 7.54573 30.8573H9.77234ZM11.9902 30.8573V11.7054C14.9897 10.627 16.6942 7.8853 17.1055 3.33591C17.2666 1.55463 18.9633 0.814421 20.5803 1.59505C22.1847 2.36964 23.243 4.32583 23.243 6.93947C23.243 8.50265 23.0478 10.1054 22.6582 11.7471H29.7324C31.7739 11.7471 33.4289 13.402 33.4289 15.4435C33.4289 15.7416 33.3928 16.0386 33.3215 16.328L30.9883 25.7957C30.2558 28.7683 27.5894 30.8573 24.528 30.8573H11.9911H11.9902Z" fill="currentColor"/></svg>';
+const IC_COIN = '<svg viewBox="0 0 28 28" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M14.045 25.5454C7.69377 25.5454 2.54504 20.3967 2.54504 14.0454C2.54504 7.69413 7.69377 2.54541 14.045 2.54541C20.3963 2.54541 25.545 7.69413 25.545 14.0454C25.545 17.0954 24.3334 20.0205 22.1768 22.1771C20.0201 24.3338 17.095 25.5454 14.045 25.5454ZM9.66202 6.81624H18.2761C18.825 6.81624 19.27 7.22183 19.27 7.72216C19.27 8.22248 18.825 8.62807 18.2761 8.62807H14.95V10.2903C17.989 10.4444 20.3766 12.9487 20.3855 15.9916V17.1995C20.3854 17.6997 19.9799 18.1052 19.4796 18.1052C18.9793 18.1052 18.5738 17.6997 18.5737 17.1995V15.9916C18.5667 13.9478 16.9882 12.2535 14.95 12.1022V20.5574C14.95 21.0577 14.5444 21.4633 14.0441 21.4633C13.5437 21.4633 13.1382 21.0577 13.1382 20.5574V12.1022C11.1 12.2535 9.52148 13.9478 9.51448 15.9916V17.1995C9.5144 17.6997 9.10883 18.1052 8.60856 18.1052C8.1083 18.1052 7.70273 17.6997 7.70265 17.1995V15.9916C7.71158 12.9487 10.0992 10.4444 13.1382 10.2903V8.62807H9.66202C9.11309 8.62807 8.66809 8.22248 8.66809 7.72216C8.66809 7.22183 9.11309 6.81624 9.66202 6.81624Z" fill="currentColor"/></svg>';
+const IC_FAV = '<svg viewBox="0 0 28 28" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M19.8071 9.26152C18.7438 9.09915 17.7624 8.36846 17.3534 7.39421L15.4723 3.4972C14.8998 2.1982 13.1004 2.1982 12.4461 3.4972L10.6468 7.39421C10.1561 8.36846 9.25639 9.09915 8.19315 9.26152L3.94016 9.91102C2.63155 10.0734 2.05904 11.6972 3.04049 12.6714L6.23023 15.9189C6.96632 16.6496 7.29348 17.705 7.1299 18.7605L6.39381 23.307C6.14844 24.6872 7.62063 25.6614 8.84745 25.0119L12.4461 23.0634C13.4276 22.4951 14.6544 22.4951 15.6359 23.0634L19.2345 25.0119C20.4614 25.6614 21.8518 24.6872 21.6882 23.307L20.8703 18.7605C20.7051 17.705 21.0339 16.6496 21.77 15.9189L24.9597 12.6714C25.9412 11.6972 25.3687 10.0734 24.06 9.91102L19.8071 9.26152Z" fill="currentColor"/></svg>';
+const IC_CMT = '<svg viewBox="0 0 24 24" fill="none"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H11l-4.5 4v-4h-1A1.5 1.5 0 0 1 4 14.5v-9Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>';
+const wrap = document.getElementById('opWrap');
+let myMid = 0;
+
+// 服务端已转义并拼好 HTML（文字/表情/链接），这里按 HTML 输出
+function blocksHTML(blocks, allImages) {
+  return blocks.map(b => {
+    if (b.type === 'text') return `<p>${b.html}</p>`;
+    if (b.type === 'quote') return `<blockquote>${b.html}</blockquote>`;
+    if (b.type === 'line') return '<hr>';
+    if (b.type === 'list') return `<ul>${b.items.map(i => `<li>${i}</li>`).join('')}</ul>`;
+    if (b.type === 'images') {
+      return '<div class="op-pics">' + b.images.map(im => {
+        const idx = allImages.length; allImages.push(im.url);
+        return `<button type="button" class="op-pic" data-i="${idx}"><img src="${esc(im.url)}" alt="" loading="lazy" referrerpolicy="no-referrer"></button>`;
+      }).join('') + '</div>';
+    }
+    return '';
+  }).join('');
+}
+
+async function init() {
+  const id = new URLSearchParams(location.search).get('id') || '';
+  if (!/^\d{1,20}$/.test(id)) { wrap.innerHTML = '<div class="op-state">缺少图文 id</div>'; return; }
+  let m = { loggedIn: false };
+  try { const r = await fetch('/api/me'); m = await r.json(); } catch (e) {}
+  applyHeaderLogin(m);
+  myMid = Number(m.user && m.user.mid) || 0;
+
+  let d;
+  try {
+    const r = await fetch('/api/opus?id=' + id);
+    d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || '图文加载失败');
+  } catch (e) {
+    wrap.innerHTML = `<div class="op-state">${esc(e.message || '图文加载失败')}<br><a href="https://www.bilibili.com/opus/${id}" target="_blank" rel="noreferrer noopener">去 B 站查看</a></div>`;
+    return;
+  }
+  document.title = (d.title ? d.title.replace(/<[^>]+>/g, '') : '图文') + ' - B站视频搜索器';
+  const a = d.author || {};
+  // 专栏型图文（comment_type=12）才支持投币/收藏，aid=专栏 id；纯动态型没有对应通道
+  const triple = !!(d.comment && d.comment.type === 12);
+  if (d.stat == null) d.stat = {};
+  ['like', 'coin', 'fav', 'comment'].forEach((k) => { if (d.stat[k] == null) d.stat[k] = 0; });
+  const images = [];
+  const body = blocksHTML(d.blocks || [], images);
+  wrap.innerHTML = `
+    ${d.title ? `<h1 class="op-title">${d.title}</h1>` : ''}
+    <div class="op-author">
+      <a class="op-avatar" href="/account?mid=${esc(a.mid)}">${a.face ? `<img src="${esc(a.face)}" alt="" referrerpolicy="no-referrer">` : ''}</a>
+      <div><a class="op-name" href="/account?mid=${esc(a.mid)}">${a.name || '未知用户'}</a><div class="op-time" title="${esc(absTime(a.ts))}">${esc(a.time || '')}</div></div>
+      <a class="op-orig" href="${esc(d.url)}" target="_blank" rel="noreferrer noopener">在 B 站打开</a>
+    </div>
+    <div class="op-body">${body || '<p style="color:var(--text-3)">这篇图文暂时没有可显示的内容</p>'}</div>
+    <div class="op-foot">
+      <button type="button" class="op-stat${d.stat.liked ? ' active' : ''}" id="opLike">${IC_LIKE}<span>${d.stat.like ? fmtCount(d.stat.like) : '点赞'}</span></button>
+      <button type="button" class="op-stat${d.stat.coined ? ' active' : ''}" id="opCoin"${triple ? '' : ' title="该图文暂不支持投币" disabled style="opacity:.45;cursor:not-allowed"'}>${IC_COIN}<span>${d.stat.coin ? fmtCount(d.stat.coin) : '投币'}</span></button>
+      <button type="button" class="op-stat${d.stat.faved ? ' active' : ''}" id="opFav"${triple ? '' : ' title="该图文暂不支持收藏" disabled style="opacity:.45;cursor:not-allowed"'}>${IC_FAV}<span>${d.stat.fav ? fmtCount(d.stat.fav) : '收藏'}</span></button>
+      <span class="op-stat" style="cursor:default">${IC_CMT}<span id="opCmtCount">${d.stat.comment ? fmtCount(d.stat.comment) : '评论'}</span></span>
+    </div>
+    <div id="opComments"></div>`;
+
+  BiliLightbox.bind(wrap, '.op-pic', (el) => ({ list: images, index: Number(el.dataset.i) }));
+
+  // 点赞：图文 id 通常就是它背后那条动态的 id，直接走动态点赞接口
+  const likeBtn = document.getElementById('opLike');
+  const setLikeUI = (on) => {
+    d.stat.liked = on; d.stat.like = Math.max(0, d.stat.like + (on ? 1 : -1));
+    likeBtn.classList.toggle('active', on);
+    likeBtn.querySelector('span').textContent = d.stat.like ? fmtCount(d.stat.like) : '点赞';
+  };
+  likeBtn.addEventListener('click', async () => {
+    if (likeBtn.classList.contains('busy')) return;
+    const want = !d.stat.liked;
+    const apply = setLikeUI;
+    apply(want); likeBtn.classList.add('busy');
+    try {
+      const r = await fetch('/api/dynamics/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dynId: d.id, like: want }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { apply(!want); showToast(j.error || '点赞失败'); if (r.status === 401) setTimeout(() => location.href = '/account', 1200); }
+    } catch (e) { apply(!want); showToast('网络异常，请重试'); }
+    finally { likeBtn.classList.remove('busy'); }
+  });
+
+  // 投币 + 收藏：只对专栏型图文（comment_type=12）开放，aid=专栏 id（comment_id_str）
+  const oid = d.comment && d.comment.oid;
+  if (triple && oid) {
+    const coinBtn = document.getElementById('opCoin');
+    const favBtn = document.getElementById('opFav');
+    const upid = a.mid || 0;
+
+    // 投币弹窗（结构参考 player.html 的 coin-dialog，精简版）
+    const openCoinDialog = () => {
+      const already = d.stat.coined;
+      const mask = document.createElement('div');
+      mask.className = 'coin-mask';
+      mask.innerHTML = `
+        <div class="coin-dialog" role="dialog" aria-modal="true">
+          <button type="button" class="coin-close" aria-label="关闭">&times;</button>
+          <div class="coin-title">给UP主投<span class="coin-num">1</span>枚硬币</div>
+          <div class="coin-cards">
+            <button type="button" class="coin-card selected" data-n="1">${IC_COIN}1 硬币</button>
+            <button type="button" class="coin-card${already ? ' disabled' : ''}" data-n="2"${already ? ' disabled title="已投过币，每人最多投 2 枚，不能再投"' : ''}>${IC_COIN}2 硬币</button>
+          </div>
+          <label class="coin-like"><input type="checkbox" checked>同时点赞内容</label>
+          <div class="coin-footer"><button type="button" class="coin-ok">确定</button></div>
+        </div>`;
+      document.body.appendChild(mask);
+      let num = 1;
+      const numEl = mask.querySelector('.coin-num');
+      const close = () => mask.remove();
+      mask.addEventListener('click', (ev) => { if (ev.target === mask) close(); });
+      mask.querySelector('.coin-close').addEventListener('click', close);
+      mask.querySelectorAll('.coin-card').forEach((c) => c.addEventListener('click', () => {
+        if (c.classList.contains('disabled')) return;
+        num = Number(c.dataset.n) || 1;
+        mask.querySelectorAll('.coin-card').forEach((x) => x.classList.toggle('selected', x === c));
+        numEl.textContent = num;
+      }));
+      mask.querySelector('.coin-ok').addEventListener('click', async () => {
+        const okBtn = mask.querySelector('.coin-ok');
+        if (okBtn.disabled) return;
+        okBtn.disabled = true;
+        const selectLike = mask.querySelector('.coin-like input').checked;
+        try {
+          const r = await fetch('/api/opus/coin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oid, upid, multiply: num, select_like: selectLike }) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) { showToast(j.error || '投币失败'); if (r.status === 401) setTimeout(() => location.href = '/account', 1200); okBtn.disabled = false; return; }
+          d.stat.coin = (d.stat.coin || 0) + num;
+          d.stat.coined = true;
+          coinBtn.classList.add('active');
+          coinBtn.querySelector('span').textContent = d.stat.coin ? fmtCount(d.stat.coin) : '投币';
+          if (selectLike && !d.stat.liked) setLikeUI(true);
+          showToast(`已投 ${num} 枚硬币`);
+          close();
+        } catch (e) { showToast('网络异常，请重试'); okBtn.disabled = false; }
+      });
+    };
+    coinBtn.addEventListener('click', () => {
+      if (d.stat.coined) { showToast('已经投过币啦'); return; }
+      openCoinDialog();
+    });
+
+    // 收藏/取消收藏
+    favBtn.addEventListener('click', async () => {
+      if (favBtn.classList.contains('busy')) return;
+      const want = !d.stat.faved;
+      const apply = (on) => {
+        d.stat.faved = on; d.stat.fav = Math.max(0, d.stat.fav + (on ? 1 : -1));
+        favBtn.classList.toggle('active', on);
+        favBtn.querySelector('span').textContent = d.stat.fav ? fmtCount(d.stat.fav) : '收藏';
+      };
+      apply(want); favBtn.classList.add('busy');
+      try {
+        const r = await fetch('/api/opus/fav', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oid, on: want }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { apply(!want); showToast(j.error || '收藏失败'); if (r.status === 401) setTimeout(() => location.href = '/account', 1200); return; }
+        showToast(want ? '已收藏' : '已取消收藏');
+      } catch (e) { apply(!want); showToast('网络异常，请重试'); }
+      finally { favBtn.classList.remove('busy'); }
+    });
+  }
+
+  if (d.comment && d.comment.oid) {
+    let count = d.stat.comment;
+    DynComments.mount(document.getElementById('opComments'), {
+      oid: d.comment.oid, type: d.comment.type, myMid, toast: showToast,
+      onCountDelta: (x) => { count = Math.max(0, count + x); document.getElementById('opCmtCount').textContent = count ? fmtCount(count) : '评论'; },
+    });
+  }
+}
+init();
+</script>
+<script src="/msg-badge.js" defer></script>
+</body>
+</html>

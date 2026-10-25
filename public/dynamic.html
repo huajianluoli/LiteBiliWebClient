@@ -19,7 +19,7 @@
     --header-h: 64px;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
+  body { margin: 0; background: var(--card); color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, sans-serif; }
   a { color: inherit; text-decoration: none; }
   button { font-family: inherit; }
@@ -55,7 +55,8 @@
   .dy-newpill { display: none; position: sticky; top: calc(var(--header-h) + 8px); z-index: 20; margin: 0 auto 12px; width: fit-content; padding: 8px 18px; border: none; border-radius: 18px; background: var(--pink); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 3px 12px rgba(251,114,153,.45); }
   .dy-newpill.show { display: block; }
 
-  .dy-item { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px 6px; margin-bottom: 12px; }
+  .dy-item { padding: 20px 0 4px; border-bottom: 1px solid var(--border); }
+  .dy-item:last-child { border-bottom: none; }
   .dy-head { display: flex; align-items: center; gap: 12px; }
   .dy-avatar { width: 44px; height: 44px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: var(--bg); }
   .dy-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -66,7 +67,7 @@
   .dy-tag { padding: 0 6px; border-radius: 3px; font-size: 11px; line-height: 17px; background: var(--bg); color: var(--text-2); }
   .dy-tag.pink { background: rgba(251,114,153,.14); color: var(--pink); }
 
-  .dy-body { margin-top: 12px; padding-left: 56px; }
+  .dy-body { margin-top: 10px; padding-left: 56px; }
   .dy-title { font-size: 16px; font-weight: 700; margin: 0 0 6px; line-height: 1.5; word-break: break-all; }
   .dy-text { font-size: 15px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
   .dy-text.clamp { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
@@ -87,40 +88,60 @@
   .dy-images.count-1 .dy-img img { height: auto; max-height: 420px; object-fit: contain; }
   .dy-img-more { margin-top: 6px; font-size: 12px; color: var(--text-3); }
 
-  /* 视频 / 直播 / 专栏 / 通用 卡片 */
-  .dy-card { margin-top: 10px; display: flex; gap: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); transition: border-color .15s; }
-  .dy-card:hover { border-color: var(--pink); }
-  .dy-card-cover { position: relative; flex-shrink: 0; width: 180px; aspect-ratio: 16/10; border-radius: 6px; overflow: hidden; background: var(--border); }
+  /* 视频 / 直播：和搜索页一致的竖向卡片（封面 + 左下播放/弹幕 + 右下时长 + 两行标题 + UP 行） */
+  .vcard { display: block; width: 280px; max-width: 100%; margin-top: 10px; color: inherit; cursor: pointer; transition: transform .12s ease; }
+  .vcard:hover { transform: translateY(-3px); }
+  .vcard:hover .vcard-title { color: var(--pink); }
+  .vcard-thumb { position: relative; display: block; width: 100%; aspect-ratio: 16 / 10; background: var(--border); border-radius: 8px; overflow: hidden; }
+  .vcard-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .vcard-thumb::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 40%; background: linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0)); pointer-events: none; }
+  .vcard-stats { position: absolute; left: 6px; bottom: 6px; display: flex; gap: 8px; color: #fff; font-size: 12px; z-index: 1; }
+  .vcard-stat { display: flex; align-items: center; gap: 3px; }
+  .vcard-stat svg { flex-shrink: 0; }
+  .vcard-dur { position: absolute; right: 6px; bottom: 6px; z-index: 1; padding: 1px 5px; border-radius: 3px; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; }
+  .vcard-live { position: absolute; left: 6px; top: 6px; z-index: 1; padding: 1px 7px; border-radius: 4px; background: var(--pink); color: #fff; font-size: 11px; font-weight: 600; }
+  .vcard-body { display: block; padding: 8px 2px 2px; }
+  .vcard-title { margin: 0 0 4px; font-size: 14px; line-height: 1.4; max-height: 2.8em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: var(--text); }
+  .vcard-author { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; }
+  .vcard-author svg { flex-shrink: 0; }
+  .vcard-author span { overflow: hidden; text-overflow: ellipsis; }
+
+  /* 专栏 / 番剧 / 课程等：横向通用卡片 */
+  .dy-card { margin-top: 10px; display: flex; gap: 12px; padding: 10px; border-radius: 10px; background: var(--bg); color: inherit; }
+  .dy-card:hover .dy-card-title { color: var(--pink); }
+  .dy-card-cover { position: relative; flex-shrink: 0; width: 160px; aspect-ratio: 16/10; border-radius: 6px; overflow: hidden; background: var(--border); }
   .dy-card-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .dy-card-dur { position: absolute; right: 6px; bottom: 6px; padding: 1px 6px; border-radius: 4px; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; }
-  .dy-card-live { position: absolute; left: 6px; top: 6px; padding: 1px 7px; border-radius: 4px; background: var(--pink); color: #fff; font-size: 11px; font-weight: 600; }
   .dy-card-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
   .dy-card-title { font-size: 14px; font-weight: 600; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .dy-card-brief { font-size: 12px; color: var(--text-2); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .dy-card-stats { margin-top: auto; font-size: 12px; color: var(--text-3); display: flex; gap: 12px; }
   .dy-badge { align-self: flex-start; padding: 0 6px; border-radius: 3px; font-size: 11px; line-height: 17px; background: rgba(251,114,153,.14); color: var(--pink); }
   .dy-none { margin-top: 10px; padding: 14px; border-radius: 8px; background: var(--bg); color: var(--text-3); font-size: 13px; text-align: center; }
+  .dy-opus-link { display: inline-block; margin-top: 8px; font-size: 13px; color: var(--blue); }
+  .dy-opus-link:hover { text-decoration: underline; }
 
   /* 转发 */
   .dy-forward { margin-top: 10px; padding: 12px 14px 14px; border-radius: 8px; background: var(--bg); }
   .dy-forward-author { font-size: 14px; margin-bottom: 6px; }
   .dy-forward-author a { color: var(--blue); font-weight: 600; }
   .dy-forward .dy-card { background: var(--card); }
+  .dy-forward .vcard { width: 260px; }
   .dy-forward .dy-images { max-width: 420px; }
 
   /* 底部统计 */
-  .dy-foot { margin: 12px 0 0 56px; padding: 6px 0 8px; display: flex; align-items: center; gap: 4px; border-top: 1px solid var(--bg); }
+  .dy-foot { margin: 8px 0 0 56px; padding: 4px 0 10px; display: flex; align-items: center; gap: 4px; }
   .dy-stat { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px 6px 0; margin-right: 12px; border: none; background: none; color: var(--text-3); font-size: 13px; cursor: pointer; }
   .dy-stat svg { width: 19px; height: 19px; display: block; }
   .dy-stat:hover { color: var(--pink); }
   .dy-stat.active { color: var(--pink); }
   .dy-stat.active svg path { fill: currentColor; }
   .dy-stat.busy { opacity: .5; pointer-events: none; }
+  .dy-stat.open { color: var(--pink); }
+  .dy-comments-slot { margin: 0 0 14px 56px; }
 
   .dy-state { text-align: center; color: var(--text-3); font-size: 13px; padding: 26px 0; }
   .dy-state .btn { margin-top: 10px; padding: 7px 22px; border: none; border-radius: 16px; background: var(--pink); color: #fff; font-size: 13px; cursor: pointer; }
-  .dy-empty { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 60px 20px; text-align: center; color: var(--text-3); font-size: 14px; }
-  .dy-login { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 60px 20px; text-align: center; }
+  .dy-empty { padding: 60px 20px; text-align: center; color: var(--text-3); font-size: 14px; }
+  .dy-login { padding: 60px 20px; text-align: center; }
   .dy-login h2 { margin: 0 0 8px; font-size: 18px; }
   .dy-login p { margin: 0 0 18px; color: var(--text-2); font-size: 13px; }
   .dy-login a { display: inline-block; padding: 9px 26px; border-radius: 18px; background: var(--pink); color: #fff; font-size: 14px; font-weight: 600; }
@@ -128,21 +149,9 @@
   /* 骨架屏 */
   .sk { background: linear-gradient(90deg, var(--bg) 25%, var(--border) 37%, var(--bg) 63%); background-size: 400% 100%; animation: skShine 1.4s ease infinite; border-radius: 6px; }
   @keyframes skShine { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
-  .sk-item { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px 18px; margin-bottom: 12px; }
+  .sk-item { padding: 20px 0 22px; border-bottom: 1px solid var(--border); }
   .sk-row { display: flex; gap: 12px; align-items: center; }
   .sk-avatar { width: 44px; height: 44px; border-radius: 50%; }
-
-  /* 图片灯箱 */
-  .dy-lb { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.88); align-items: center; justify-content: center; }
-  .dy-lb.show { display: flex; }
-  .dy-lb img { max-width: 92vw; max-height: 88vh; object-fit: contain; user-select: none; -webkit-user-drag: none; }
-  .dy-lb-btn { position: absolute; width: 44px; height: 44px; border: none; border-radius: 50%; background: rgba(255,255,255,.14); color: #fff; font-size: 26px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
-  .dy-lb-btn:hover { background: rgba(255,255,255,.28); }
-  .dy-lb-prev { left: 18px; top: 50%; transform: translateY(-50%); }
-  .dy-lb-next { right: 18px; top: 50%; transform: translateY(-50%); }
-  .dy-lb-close { right: 18px; top: 18px; }
-  .dy-lb-count { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); padding: 3px 12px; border-radius: 12px; background: rgba(0,0,0,.5); color: #fff; font-size: 13px; }
-  .dy-lb.single .dy-lb-prev, .dy-lb.single .dy-lb-next, .dy-lb.single .dy-lb-count { display: none; }
 
   .bvid-toast { position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%) translateY(20px); background: rgba(24,25,28,.9); color: #fff; font-size: 14px; padding: 10px 18px; border-radius: 8px; z-index: 1200; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; white-space: nowrap; }
   .bvid-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -153,11 +162,13 @@
     .logo-svg { height: 24px; }
     .user-actions .user-icon:not(.always-show):not(.active) { display: none; }
     .dy-wrap { padding: 12px 10px 70px; }
-    .dy-item { padding: 14px 12px 4px; }
+    .dy-item { padding: 16px 0 4px; }
     .dy-body { padding-left: 0; }
     .dy-foot { margin-left: 0; }
     .dy-card { flex-direction: column; }
     .dy-card-cover { width: 100%; }
+    .dy-comments-slot { margin-left: 0; }
+    .vcard { width: 100%; }
   }
 
   /* ============ 深色模式 ============ */
@@ -232,16 +243,10 @@
   <div id="feedState"></div>
 </div>
 
-<div class="dy-lb" id="lightbox" aria-hidden="true">
-  <button type="button" class="dy-lb-btn dy-lb-close" id="lbClose" aria-label="关闭">&times;</button>
-  <button type="button" class="dy-lb-btn dy-lb-prev" id="lbPrev" aria-label="上一张">&#8249;</button>
-  <img id="lbImg" alt="">
-  <button type="button" class="dy-lb-btn dy-lb-next" id="lbNext" aria-label="下一张">&#8250;</button>
-  <div class="dy-lb-count" id="lbCount"></div>
-</div>
-
 <div class="bvid-toast" id="bvidToast"></div>
 
+<script src="/lightbox.js"></script>
+<script src="/dyn-comments.js"></script>
 <script>
 // ============ 登录凭证 / 设备 ID（与其它页面一致） ============
 let _credsMem = {};
@@ -301,6 +306,9 @@ const IC = {
   forward: '<svg viewBox="0 0 24 24" fill="none"><path d="M14 5l7 6.5-7 6.5v-4c-5 0-8.5 1.2-11 4.5.6-5.5 4-9.5 11-10V5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
   comment: '<svg viewBox="0 0 24 24" fill="none"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H11l-4.5 4v-4h-1A1.5 1.5 0 0 1 4 14.5v-9Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
   like: '<svg viewBox="0 0 24 24" fill="none"><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3Zm0 0l4.5-8a2 2 0 0 1 3.5 1.5V9h4.2a2 2 0 0 1 1.97 2.3l-1.1 7A2 2 0 0 1 18.1 20H10a3 3 0 0 1-3-3v-6Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  play: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="2" y="4" width="20" height="16" rx="4" stroke="currentColor" stroke-width="1.6"/><path d="M4 4.5C4 3.6 4.99 3.05 5.75 3.52L19.5 12L5.75 20.48C4.99 20.95 4 20.4 4 19.5V4.5Z" fill="currentColor" transform="translate(6.6,6) scale(0.5)"/></svg>',
+  dm: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="2" y="4" width="20" height="16" rx="4" stroke="currentColor" stroke-width="1.6"/><line x1="6" y1="9.5" x2="15" y2="9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="6" y1="14.5" x2="18" y2="14.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  up: '<svg width="16" height="13" viewBox="0 0 24 20"><rect x="0.5" y="0.5" width="23" height="19" rx="4" fill="none" stroke="currentColor" stroke-width="1.3"/><text x="12" y="14" text-anchor="middle" font-size="10" font-weight="700" fill="currentColor" font-family="-apple-system,BlinkMacSystemFont,\'PingFang SC\',\'Microsoft YaHei\',Roboto,sans-serif">UP</text></svg>',
 };
 const img = (url) => `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`;
 
@@ -311,21 +319,29 @@ function imagesHTML(images, extra, idPrefix) {
   return `<div class="dy-images count-${Math.min(images.length, 9)}">${cells}</div>${more}`;
 }
 
-function cardHTML(c) {
+// 视频 / 直播：搜索页同款竖向卡片；其余类型走横向通用卡片
+function cardHTML(c, authorName) {
   if (!c) return '';
   if (c.kind === 'none') return `<div class="dy-none">${c.tips}</div>`;
+  if (c.kind === 'video' || (c.kind === 'live' && c.roomId)) {
+    const isVideo = c.kind === 'video';
+    const href = isVideo ? `/player?bv=${encodeURIComponent(c.bvid || '')}${c.bvid ? '' : '&av=' + c.aid}` : `/stream?room_id=${c.roomId}`;
+    const stats = isVideo
+      ? `<span class="vcard-stats">${c.play ? `<span class="vcard-stat">${IC.play}${esc(c.play)}</span>` : ''}${c.danmaku ? `<span class="vcard-stat">${IC.dm}${esc(c.danmaku)}</span>` : ''}</span>`
+      : (c.desc ? `<span class="vcard-stats"><span class="vcard-stat">${c.desc}</span></span>` : '');
+    return `<a class="vcard" href="${esc(href)}">
+      <span class="vcard-thumb">${c.cover ? img(c.cover) : ''}${stats}${isVideo && c.duration ? `<span class="vcard-dur">${esc(c.duration)}</span>` : ''}${!isVideo && c.liveState ? '<span class="vcard-live">直播中</span>' : ''}</span>
+      <span class="vcard-body"><p class="vcard-title">${c.title || ''}</p>${authorName ? `<span class="vcard-author">${IC.up}<span>${authorName}</span></span>` : ''}</span>
+    </a>`;
+  }
   let href = '', target = '';
-  if (c.kind === 'video') href = `/player?bv=${encodeURIComponent(c.bvid || '')}${c.bvid ? '' : '&av=' + c.aid}`;
-  else if (c.kind === 'live' && c.roomId) href = `/stream?room_id=${c.roomId}`;
-  else if (c.url) { href = c.url; target = ' target="_blank" rel="noreferrer noopener"'; }
+  if (c.url) { href = c.url; target = ' target="_blank" rel="noreferrer noopener"'; }
   const tag = href ? 'a' : 'div';
   const hrefAttr = href ? ` href="${esc(href)}"${target}` : '';
-  const cover = c.cover ? `<span class="dy-card-cover">${img(c.cover)}${c.duration ? `<span class="dy-card-dur">${esc(c.duration)}</span>` : ''}${c.kind === 'live' && c.liveState ? '<span class="dy-card-live">直播中</span>' : ''}</span>` : '';
-  const stats = c.kind === 'video' && (c.play || c.danmaku)
-    ? `<span class="dy-card-stats">${c.play ? `<span>▶ ${esc(c.play)}</span>` : ''}${c.danmaku ? `<span>弹 ${esc(c.danmaku)}</span>` : ''}</span>` : '';
+  const cover = c.cover ? `<span class="dy-card-cover">${img(c.cover)}</span>` : '';
   const brief = c.desc ? `<span class="dy-card-brief">${c.desc}</span>` : '';
   const badge = c.badge || c.label ? `<span class="dy-badge">${c.badge || c.label}</span>` : '';
-  return `<${tag} class="dy-card"${hrefAttr}>${cover}<span class="dy-card-info"><span class="dy-card-title">${c.title || ''}</span>${brief}${badge}${stats}</span></${tag}>`;
+  return `<${tag} class="dy-card"${hrefAttr}>${cover}<span class="dy-card-info"><span class="dy-card-title">${c.title || ''}</span>${brief}${badge}</span></${tag}>`;
 }
 
 function authorHref(a) { return a.mid ? `/account?mid=${a.mid}` : '#'; }
@@ -338,12 +354,13 @@ function forwardHTML(f, idPrefix) {
     ${f.title ? `<div class="dy-title">${f.title}</div>` : ''}
     ${f.text ? `<div class="dy-text">${f.text}</div>` : ''}
     ${imagesHTML(f.images, f.extraImageCount, idPrefix)}
-    ${cardHTML(f.card)}
+    ${cardHTML(f.card, a.name)}
   </div>`;
 }
 
 let items = [];            // 已加载的动态模型（点赞状态等会改里面的字段）
 const lbGroups = {};       // 灯箱图片组：key -> images
+let myMid = 0;
 
 function itemHTML(it, index) {
   const a = it.author;
@@ -353,6 +370,7 @@ function itemHTML(it, index) {
   if (it.forward) lbGroups['f' + index] = it.forward.images;
   const hasBody = it.text || it.title || it.images.length || it.card || it.forward;
   const fallback = !hasBody ? `<div class="dy-none">这条动态暂不支持在此显示，<a href="${esc(it.url)}" target="_blank" rel="noreferrer noopener" style="color:var(--blue)">去 B 站查看</a></div>` : '';
+  const opusLink = it.type === 'DYNAMIC_TYPE_DRAW' && it.images.length ? `<a class="dy-opus-link" href="/opus?id=${esc(it.id)}">查看图文 &rsaquo;</a>` : '';
   return `<article class="dy-item" data-index="${index}">
     <div class="dy-head">
       <a class="dy-avatar" href="${esc(authorHref(a))}">${a.face ? img(a.face) : ''}</a>
@@ -366,16 +384,18 @@ function itemHTML(it, index) {
       ${it.title ? `<div class="dy-title">${it.title}</div>` : ''}
       ${it.text ? `<div class="dy-text clamp">${it.text}</div><button type="button" class="dy-more" style="display:none">展开全文</button>` : ''}
       ${imagesHTML(it.images, it.extraImageCount, 'm' + index)}
-      ${cardHTML(it.card)}
+      ${cardHTML(it.card, a.name)}
       ${it.forward !== undefined ? forwardHTML(it.forward, 'f' + index) : ''}
       ${fallback}
+      ${opusLink}
       ${it.foldStatement ? `<div class="dy-fold" style="margin-top:8px">${it.foldStatement}</div>` : ''}
     </div>
     <div class="dy-foot">
-      <a class="dy-stat" href="${esc(it.url)}" target="_blank" rel="noreferrer noopener" title="在 B 站转发">${IC.forward}<span>${it.stat.forward ? fmtCount(it.stat.forward) : '转发'}</span></a>
-      <a class="dy-stat" href="${esc(it.url)}" target="_blank" rel="noreferrer noopener" title="在 B 站查看评论">${IC.comment}<span>${it.stat.comment ? fmtCount(it.stat.comment) : '评论'}</span></a>
+      <button type="button" class="dy-stat" data-forward="${index}" title="转发">${IC.forward}<span>${it.stat.forward ? fmtCount(it.stat.forward) : '转发'}</span></button>
+      <button type="button" class="dy-stat" data-comment="${index}" title="评论">${IC.comment}<span>${it.stat.comment ? fmtCount(it.stat.comment) : '评论'}</span></button>
       <button type="button" class="dy-stat dy-like${it.stat.liked ? ' active' : ''}" data-like="${index}" title="点赞">${IC.like}<span>${it.stat.like ? fmtCount(it.stat.like) : '点赞'}</span></button>
     </div>
+    <div class="dy-comments-slot" data-slot="${index}"></div>
   </article>`;
 }
 
@@ -419,6 +439,7 @@ async function load(reset) {
     feedEl.innerHTML = skeleton(); stateEl.innerHTML = '';
     offset = ''; hasMore = true; items = [];
     for (const k of Object.keys(lbGroups)) delete lbGroups[k];
+    for (const k of Object.keys(cmHandles)) delete cmHandles[k];
   } else {
     stateEl.innerHTML = '<div class="dy-state">加载中…</div>';
   }
@@ -513,39 +534,46 @@ feedEl.addEventListener('click', async (e) => {
   finally { btn.classList.remove('busy'); }
 });
 
-/* ============ 图片灯箱 ============ */
-const lb = document.getElementById('lightbox'), lbImg = document.getElementById('lbImg'), lbCount = document.getElementById('lbCount');
-let lbList = [], lbIdx = 0;
-function lbShow() {
-  lbImg.src = lbList[lbIdx].url;
-  lbCount.textContent = `${lbIdx + 1} / ${lbList.length}`;
+/* ============ 转发（先只保留接口） ============ */
+// 服务端 POST /api/dynamics/forward 目前固定返回 501；等真的要做转发弹窗时，在这里弹出输入框再把 content 一并提交即可。
+async function forwardDynamic(it) {
+  try {
+    const r = await fetch('/api/dynamics/forward', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dynId: it.id, content: '' }) });
+    const d = await r.json().catch(() => ({}));
+    showToast(d.error || '转发成功');
+  } catch (e) { showToast('转发功能暂未开放'); }
 }
-function lbOpen(list, i) {
-  if (!list || !list.length) return;
-  lbList = list; lbIdx = i; lb.classList.toggle('single', list.length < 2);
-  lb.classList.add('show'); lb.setAttribute('aria-hidden', 'false'); lbShow();
-  document.body.style.overflow = 'hidden';
-}
-function lbClose() { lb.classList.remove('show'); lb.setAttribute('aria-hidden', 'true'); lbImg.removeAttribute('src'); document.body.style.overflow = ''; }
-function lbStep(d) { if (lbList.length < 2) return; lbIdx = (lbIdx + d + lbList.length) % lbList.length; lbShow(); }
 feedEl.addEventListener('click', (e) => {
-  const b = e.target.closest('.dy-img[data-lb]');
-  if (b) lbOpen(lbGroups[b.dataset.lb], Number(b.dataset.i));
+  const btn = e.target.closest('[data-forward]');
+  if (btn) forwardDynamic(items[Number(btn.dataset.forward)]);
 });
-document.getElementById('lbClose').onclick = lbClose;
-document.getElementById('lbPrev').onclick = (e) => { e.stopPropagation(); lbStep(-1); };
-document.getElementById('lbNext').onclick = (e) => { e.stopPropagation(); lbStep(1); };
-lb.addEventListener('click', (e) => { if (e.target === lb) lbClose(); });
-document.addEventListener('keydown', (e) => {
-  if (!lb.classList.contains('show')) return;
-  if (e.key === 'Escape') lbClose();
-  else if (e.key === 'ArrowLeft') lbStep(-1);
-  else if (e.key === 'ArrowRight') lbStep(1);
+
+/* ============ 评论：点"评论"在这条动态下面展开（评论面板见 /dyn-comments.js） ============ */
+const cmHandles = {};   // 动态 index -> 面板句柄
+feedEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-comment]');
+  if (!btn) return;
+  const index = Number(btn.dataset.comment);
+  const it = items[index];
+  const slot = feedEl.querySelector(`[data-slot="${index}"]`);
+  if (!it || !slot) return;
+  if (cmHandles[index]) {                         // 已展开 -> 收起
+    cmHandles[index].destroy(); delete cmHandles[index]; btn.classList.remove('open'); return;
+  }
+  btn.classList.add('open');
+  cmHandles[index] = DynComments.mount(slot, {
+    oid: it.comment.oid, type: it.comment.type, myMid, toast: showToast,
+    onCountDelta: (d) => {
+      it.stat.comment = Math.max(0, it.stat.comment + d);
+      btn.querySelector('span').textContent = it.stat.comment ? fmtCount(it.stat.comment) : '评论';
+    },
+  });
 });
-// 手机左右滑动切图
-let tx = 0;
-lb.addEventListener('touchstart', (e) => { tx = e.touches[0].clientX; }, { passive: true });
-lb.addEventListener('touchend', (e) => { const dx = e.changedTouches[0].clientX - tx; if (Math.abs(dx) > 50) lbStep(dx < 0 ? 1 : -1); });
+
+/* ============ 配图大图（共享 lightbox.js；评论附图由评论面板自己绑定） ============ */
+BiliLightbox.bind(feedEl, '.dy-img[data-lb]', (el) => ({
+  list: (lbGroups[el.dataset.lb] || []).map(i => i.url), index: Number(el.dataset.i),
+}));
 
 /* ============ 入口 ============ */
 (async function init() {
@@ -553,6 +581,7 @@ lb.addEventListener('touchend', (e) => { const dx = e.changedTouches[0].clientX 
   try { const r = await fetch('/api/me'); m = await r.json(); } catch (e) {}
   applyHeaderLogin(m);
   loggedIn = !!m.loggedIn;
+  myMid = Number(m.user && m.user.mid) || 0;
   if (!loggedIn) { showLogin(); return; }
   load(true);
 })();

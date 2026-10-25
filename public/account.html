@@ -505,6 +505,18 @@
     .user-actions .user-icon:not(.always-show) { display: none; }
   }
 
+  /* ---- 图文标签 ---- */
+  .opus-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 18px 14px; }
+  .opus-card { display: flex; flex-direction: column; gap: 6px; color: inherit; transition: transform .12s ease; }
+  .opus-card:hover { transform: translateY(-3px); }
+  .opus-card:hover .opus-title { color: var(--pink); }
+  .opus-cover { position: relative; display: block; width: 100%; aspect-ratio: 3 / 2; border-radius: 8px; overflow: hidden; background: var(--bg); }
+  .opus-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .opus-title { font-size: 14px; line-height: 1.4; max-height: 2.8em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-all; }
+  .opus-sub { font-size: 12px; color: var(--text-2); line-height: 1.5; max-height: 3em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-all; }
+  .opus-stat { font-size: 12px; color: var(--text-3); }
+  .more-wrap { text-align: center; padding: 18px 0 4px; }
+
   /* ============ 深色模式 ============ */
   :root[data-theme="dark"] {
     --bg: #141414;
@@ -860,14 +872,15 @@ async function toggleFollow(btn) {
   }
 }
 
-function addTab(key, label) {
+function addTab(key, label, afterKey) {
   const tabs = document.getElementById('tabs');
   if (!tabs || tabs.querySelector(`[data-tab="${key}"]`)) return;
   const b = document.createElement('button');
   b.className = 'tab';
   b.dataset.tab = key;
   b.textContent = label;
-  tabs.appendChild(b);
+  const after = afterKey && tabs.querySelector(`[data-tab="${afterKey}"]`);
+  if (after) after.insertAdjacentElement('afterend', b); else tabs.appendChild(b);
 }
 
 function setTabCount(key, count) {
@@ -882,7 +895,7 @@ function activateTab(key) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === key));
   // 离开收藏夹内容页后清空来源标记，避免其它 tab 的视频误带 from 参数
   if (key !== 'fav') _curFavId = '';
-  ({ videos: loadVideos, history: loadHistory, fav: loadFavs, following: loadRelList, follower: loadRelList })[key]();
+  ({ videos: loadVideos, opus: loadOpus, history: loadHistory, fav: loadFavs, following: loadRelList, follower: loadRelList })[key]();
 }
 
 // 等级经验条（Lv.x 徽章右侧）。经验数据只有 /api/me（nav 接口）返回，
@@ -994,6 +1007,8 @@ function renderProfile(u, isSelf) {
   }
   activateTab(start);
 
+  probeOpusTab(ctx.mid);
+
   // 关注的人 / 粉丝 tab
   addTab('following', '关注的人');
   addTab('follower', '粉丝');
@@ -1018,6 +1033,85 @@ async function probeExtraTabs(mid) {
   if (h && (h.list || []).length) addTab('history', '历史记录');
   if (f && (f.list || []).length) addTab('fav', '收藏夹');
   // addTab 追加在末尾，标签的 active 状态无需重置
+}
+
+// ---- 图文 ----
+// 先拉第一页：有内容才在"投稿视频"后面加一个"图文"标签（没发过图文的人不出现这个标签）；
+// 第一页结果缓存起来，点进标签时不用重复请求。
+let _opusFirst = null;
+async function probeOpusTab(mid) {
+  _opusFirst = null;
+  try {
+    const r = await fetch(`/api/user/${mid}/opus?page=1`);
+    if (!r.ok) return;
+    const d = await r.json();
+    if (ctx.mid !== mid || !(d.list || []).length) return;
+    _opusFirst = d;
+    addTab('opus', '图文', 'videos');
+    if (qTab === 'opus') activateTab('opus');
+  } catch (e) {}
+}
+
+// UP 没设封面（或封面加载失败）时用的默认封面，3:2
+const OPUS_DEFAULT_COVER = '/images/opus_cover.jpg';
+function opusCardHTML(o) {
+  const title = o.title || o.text || '图文';
+  const sub = o.title ? o.text : '';
+  const stat = [o.view ? `${esc(o.view)} 浏览` : '', o.like !== '' && o.like != null ? `${fmtCount(o.like)} 赞` : ''].filter(Boolean).join(' · ');
+  return `<a class="opus-card" href="${esc(o.url)}">
+    <span class="opus-cover"><img src="${esc(o.cover || OPUS_DEFAULT_COVER)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="if(this.src.indexOf('opus_cover')<0){this.src='${OPUS_DEFAULT_COVER}'}else{this.style.visibility='hidden'}"></span>
+    <span class="opus-title">${title}</span>
+    ${sub ? `<span class="opus-sub">${sub}</span>` : ''}
+    ${stat ? `<span class="opus-stat">${stat}</span>` : ''}
+  </a>`;
+}
+
+async function loadOpus() {
+  const p = panelEl();
+  const token = ++panelToken;
+  p.innerHTML = '<div class="opus-grid" id="opusGrid"></div><div id="opusFoot"></div>';
+  const grid = p.querySelector('#opusGrid'), foot = p.querySelector('#opusFoot');
+  let page = 0, offset = '', first = _opusFirst;
+
+  const render = (d) => {
+    page = Number(d.page) || page + 1;
+    offset = d.offset || '';
+    grid.insertAdjacentHTML('beforeend', (d.list || []).map(opusCardHTML).join(''));
+    if (!grid.children.length) { p.innerHTML = `<div class="empty">${ctx.isSelf ? '你' : 'TA'}还没有发布图文</div>`; return; }
+    foot.innerHTML = d.hasMore ? '<div class="more-wrap"><button class="btn" id="opusMore">加载更多</button></div>' : '';
+    const mb = foot.querySelector('#opusMore');
+    if (mb) mb.onclick = fetchMore;
+  };
+  const fetchMore = async () => {
+    const mb = foot.querySelector('#opusMore');
+    if (mb) { mb.disabled = true; mb.textContent = '加载中…'; }
+    try {
+      const q = new URLSearchParams({ page: page + 1 });
+      if (offset) q.set('offset', offset);
+      const r = await fetch(`/api/user/${ctx.mid}/opus?${q}`);
+      const d = await r.json();
+      if (token !== panelToken) return;
+      if (!r.ok) throw new Error(d.error || '图文加载失败');
+      render(d);
+    } catch (e) {
+      if (token !== panelToken) return;
+      foot.innerHTML = `<div class="more-wrap"><button class="btn" id="opusMore">${esc(e.message || '加载失败')}，点击重试</button></div>`;
+      foot.querySelector('#opusMore').onclick = fetchMore;
+    }
+  };
+
+  if (first) { _opusFirst = null; render(first); return; }
+  p.innerHTML = '<div class="loading">正在加载图文…</div>';
+  try {
+    const r = await fetch(`/api/user/${ctx.mid}/opus?page=1`);
+    const d = await r.json();
+    if (token !== panelToken) return;
+    if (!r.ok) throw new Error(d.error || '图文加载失败');
+    _opusFirst = d;           // 缓存后重新走一遍"有第一页数据"的渲染路径
+    return loadOpus();
+  } catch (e) {
+    if (token === panelToken) showPanelError(p, e.message || '图文加载失败', loadOpus);
+  }
 }
 
 // ---- 投稿视频 ----

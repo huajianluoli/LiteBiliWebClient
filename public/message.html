@@ -94,6 +94,7 @@
   .im-emote-panel img { width: 32px; height: 32px; object-fit: contain; cursor: pointer; }
   .inline-emote { display: inline; width: 22px; height: 22px; vertical-align: middle; object-fit: contain; }
   .im-msg-bubble img:not(.inline-emote) { max-width: 200px; border-radius: 8px; display: block; }
+  .im-msg-bubble img.im-pic { cursor: zoom-in; }
   /* 表情输入框：contenteditable，表情以行内 <img> 插入（不换行） */
   .im-chat-input {
     width: 100%; min-height: 64px; max-height: 160px; overflow-y: auto;
@@ -597,7 +598,7 @@ function renderMsgRow(m, otherFace) {
   const mine = m.isMine;
   let bubble;
   if (m.type === 'image' && m.url) {
-    bubble = `<div class="im-msg-bubble"><img src="${esc(m.url)}" referrerpolicy="no-referrer"></div>`;
+    bubble = `<div class="im-msg-bubble"><img class="im-pic" src="${esc(m.url)}" referrerpolicy="no-referrer"></div>`;
   } else if (m.type === 'revoke') {
     bubble = `<div class="im-msg-bubble revoked">对方撤回了一条消息</div>`;
   } else {
@@ -848,6 +849,15 @@ async function load() {
   }
 }
 load();
+</script>
+<script src="/lightbox.js"></script>
+<script>
+// 私信里的图片：点击看大图；当前会话里所有图片消息可以左右切换（表情图不处理）
+BiliLightbox.bind(document, '.im-msg-bubble img.im-pic', function (el) {
+  var box = el.closest('.im-chat-messages') || document;
+  var imgs = Array.prototype.slice.call(box.querySelectorAll('.im-msg-bubble img.im-pic'));
+  return { list: imgs.map(function (i) { return i.src; }), index: imgs.indexOf(el) };
+});
 </script>
 <script src="/msg-badge.js" defer></script>
 </body>

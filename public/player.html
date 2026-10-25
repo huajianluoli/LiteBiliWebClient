@@ -4042,5 +4042,14 @@
         });
     </script>
 <script src="/msg-badge.js" defer></script>
+<script src="/lightbox.js"></script>
+<script>
+// 评论区附图：点击看大图（同一条评论里的图片可以左右切换）
+BiliLightbox.bind(document, '.comment-pic', function (el) {
+    var box = el.closest('.comment-pics');
+    var imgs = box ? Array.prototype.slice.call(box.querySelectorAll('.comment-pic')) : [el];
+    return { list: imgs.map(function (i) { return i.currentSrc || i.src; }), index: imgs.indexOf(el) };
+});
+</script>
 </body>
 </html>
