@@ -1594,22 +1594,35 @@ app.post("/api/video/fav/toggle", async (req, res) => {
 });
 
 // ----------------------------- 评论区 -----------------------------
+// 评论区对象类型：1 视频；11 图文(相簿)；12 专栏；17 动态。其它一律按视频处理，避免被乱传。
+function commentType(raw) {
+  const t = String(raw == null ? "" : raw).trim();
+  return ["1", "11", "12", "17"].includes(t) ? t : "1";
+}
+// oid 当字符串处理：动态/图文的 oid 是 18~19 位整数，parseInt 会丢精度
+function commentOid(raw) {
+  const s = String(raw == null ? "" : raw).trim();
+  return /^\d{1,20}$/.test(s) ? s : "";
+}
+
 // 参考 WristBilibili 的 getReply/getReply(sub)，接口不强制要求 WBI 签名。
 app.get("/api/comments", async (req, res) => {
+  const rtype = commentType(req.query.type);
   const bvid = String(req.query.bv || "").trim();
   const aid = parseInt(req.query.av || "", 10) || 0;
+  const rawOid = commentOid(req.query.oid);
   const next = parseInt(req.query.next, 10) || 0;
   const seekRpid = String(req.query.seek_rpid || "").trim();
-  if (!bvid && !aid) return res.status(400).json({ error: "缺少 bv 或 av 参数" });
+  if (rtype === "1" ? (!bvid && !aid && !rawOid) : !rawOid) return res.status(400).json({ error: "缺少 bv / av / oid 参数" });
 
   try {
     const session = getSession(req);
-    const resolvedAid = await resolveAid({ aid, bvid }, session);
+    const resolvedAid = rtype === "1" && !rawOid ? await resolveAid({ aid, bvid }, session) : rawOid;
     await ensureCookie();
 
     const u = new URL("https://api.bilibili.com/x/v2/reply/main");
     u.searchParams.set("oid", String(resolvedAid));
-    u.searchParams.set("type", "1");
+    u.searchParams.set("type", rtype);
     u.searchParams.set("mode", "3");
     u.searchParams.set("next", String(next));
     u.searchParams.set("plat", "1");
@@ -1634,7 +1647,8 @@ app.get("/api/comments", async (req, res) => {
 
 // 展开某条评论的完整子回复列表。
 app.get("/api/comments/replies", async (req, res) => {
-  const aid = parseInt(req.query.av, 10) || 0;
+  const rtype = commentType(req.query.type);
+  const aid = commentOid(req.query.av ?? req.query.oid);
   const root = String(req.query.root || "").trim();
   const pn = Math.max(1, parseInt(req.query.pn, 10) || 1);
   if (!aid || !root) return res.status(400).json({ error: "缺少 av 或 root 参数" });
@@ -1643,7 +1657,7 @@ app.get("/api/comments/replies", async (req, res) => {
     const session = getSession(req);
     const u = new URL("https://api.bilibili.com/x/v2/reply/reply");
     u.searchParams.set("oid", String(aid));
-    u.searchParams.set("type", "1");
+    u.searchParams.set("type", rtype);
     u.searchParams.set("root", root);
     u.searchParams.set("ps", "10");
     u.searchParams.set("pn", String(pn));
@@ -1662,14 +1676,15 @@ app.get("/api/comments/replies", async (req, res) => {
 app.post("/api/comments/like", async (req, res) => {
   const session = requireSession(req, res);
   if (!session) return;
-  const aid = parseInt(req.body.aid, 10) || 0;
+  const rtype = commentType(req.body.type);
+  const aid = commentOid(req.body.aid ?? req.body.oid);
   const rpid = String(req.body.rpid || "").trim();
   const like = req.body.like ? 1 : 0; // 1:点赞 0:取消
   if (!aid || !rpid) return res.status(400).json({ error: "缺少 aid 或 rpid" });
   try {
     const body = new URLSearchParams({
       oid: String(aid),
-      type: "1",
+      type: rtype,
       rpid,
       action: String(like),
       jsonp: "jsonp",
@@ -1692,19 +1707,28 @@ app.post("/api/comments/like", async (req, res) => {
 app.post("/api/comments/send", async (req, res) => {
   const session = requireSession(req, res);
   if (!session) return;
-  const aid = parseInt(req.body.aid, 10) || 0;
+  const rtype = commentType(req.body.type);
+  const aid = commentOid(req.body.aid ?? req.body.oid);
   const message = String(req.body.message || "").trim();
   const root = String(req.body.root || "").trim();
   const parent = String(req.body.parent || "").trim();
-  if (!aid || !message) return res.status(400).json({ error: "缺少 aid 或评论内容" });
+  // 附图：只收 B 站图床（*.hdslb.com）的 https 地址，最多 9 张
+  const pictures = (Array.isArray(req.body.pictures) ? req.body.pictures : []).slice(0, 9).map((p) => {
+    let host = "";
+    try { const u = new URL(String(p && p.url || "")); host = u.protocol === "https:" ? u.hostname : ""; } catch {}
+    if (!host || !(host === "hdslb.com" || host.endsWith(".hdslb.com"))) return null;
+    return { img_src: String(p.url), img_width: Number(p.width) || 0, img_height: Number(p.height) || 0, img_size: Number(p.size) || 0 };
+  }).filter(Boolean);
+  if (!aid || (!message && !pictures.length)) return res.status(400).json({ error: "缺少 aid 或评论内容" });
   try {
     const body = new URLSearchParams({
       oid: String(aid),
-      type: "1",
+      type: rtype,
       message,
       plat: "1",
       csrf: session.cookies.bili_jct || "",
     });
+    if (pictures.length) body.set("pictures", JSON.stringify(pictures));
     if (root) {
       body.set("root", root);
       body.set("parent", parent || root);
@@ -1733,13 +1757,14 @@ app.post("/api/comments/send", async (req, res) => {
 app.post("/api/comments/delete", async (req, res) => {
   const session = requireSession(req, res);
   if (!session) return;
-  const aid = parseInt(req.body.aid, 10) || 0;
+  const rtype = commentType(req.body.type);
+  const aid = commentOid(req.body.aid ?? req.body.oid);
   const rpid = String(req.body.rpid || "").trim();
   if (!aid || !rpid) return res.status(400).json({ error: "缺少 aid 或 rpid" });
   try {
     const body = new URLSearchParams({
       oid: String(aid),
-      type: "1",
+      type: rtype,
       rpid,
       csrf: session.cookies.bili_jct || "",
     });
@@ -2899,8 +2924,8 @@ app.get("/api/emote/panel", async (req, res) => {
   }
 });
 
-// 私信图片上传：转发到 B 站图片接口
-app.post("/api/message/upload-image", async (req, res) => {
+// 图片上传：转发到 B 站图片接口。私信和评论（发图）共用，请求体直接是图片文件的原始字节。
+async function uploadImageHandler(req, res) {
   const session = requireSession(req, res);
   if (!session) return;
   try {
@@ -2944,12 +2969,14 @@ app.post("/api/message/upload-image", async (req, res) => {
         return res.status(502).json({ error: "图片上传失败: " + (j.message || j.msg || j.code) });
       }
       const url = j.data?.image_url || j.data?.url || j.data?.img_url || "";
-      res.json({ url, width: j.data?.image_width || j.data?.width || 0, height: j.data?.image_height || j.data?.height || 0 });
+      res.json({ url, width: j.data?.image_width || j.data?.width || 0, height: j.data?.image_height || j.data?.height || 0, size: Number(j.data?.img_size) || 0 });
     });
   } catch (e) {
     res.status(500).json({ error: "图片上传失败" });
   }
-});
+}
+app.post("/api/message/upload-image", uploadImageHandler);
+app.post("/api/comments/upload-image", uploadImageHandler);
 
 app.post("/api/message/send", async (req, res) => {
   const session = requireSession(req, res);
@@ -3022,25 +3049,26 @@ function dynErrorText(code, fallback) {
 
 // 正文：富文本节点拼成 HTML（表情→<img>，@/话题/链接→<a>）；没有节点时整段转义
 const DYN_LINK_NODE_TYPES = new Set(["RICH_TEXT_NODE_TYPE_AT", "RICH_TEXT_NODE_TYPE_TOPIC", "RICH_TEXT_NODE_TYPE_WEB"]);
+function dynRichNodeHtml(node) {
+  const type = node && node.type;
+  const txt = dynEsc(node && (node.text != null ? node.text : node.orig_text));
+  if (type === "RICH_TEXT_NODE_TYPE_EMOJI") {
+    const e = node.emoji || {};
+    const src = normalizeImgUrl(e.gif_url || e.icon_url || "");
+    if (!src) return txt;
+    return `<img class="dy-emote" src="${dynEsc(src)}" alt="${dynEsc(e.text || node.text || "表情")}" loading="lazy" referrerpolicy="no-referrer">`;
+  }
+  if (DYN_LINK_NODE_TYPES.has(type)) {
+    const href = dynSafeUrl(node.jump_url);
+    if (href) return `<a href="${dynEsc(href)}" target="_blank" rel="noreferrer noopener">${txt}</a>`;
+  }
+  return txt;
+}
 function dynRichText(desc) {
   if (!desc) return "";
   const nodes = Array.isArray(desc.rich_text_nodes) ? desc.rich_text_nodes : [];
   if (!nodes.length) return dynEsc(desc.text);
-  return nodes.map((node) => {
-    const type = node && node.type;
-    const txt = dynEsc(node && (node.text != null ? node.text : node.orig_text));
-    if (type === "RICH_TEXT_NODE_TYPE_EMOJI") {
-      const e = node.emoji || {};
-      const src = normalizeImgUrl(e.gif_url || e.icon_url || "");
-      if (!src) return txt;
-      return `<img class="dy-emote" src="${dynEsc(src)}" alt="${dynEsc(e.text || node.text || "表情")}" loading="lazy" referrerpolicy="no-referrer">`;
-    }
-    if (DYN_LINK_NODE_TYPES.has(type)) {
-      const href = dynSafeUrl(node.jump_url);
-      if (href) return `<a href="${dynEsc(href)}" target="_blank" rel="noreferrer noopener">${txt}</a>`;
-    }
-    return txt;
-  }).join("");
+  return nodes.map(dynRichNodeHtml).join("");
 }
 
 // 主体卡片：视频/图文/专栏/直播等各自挑出要展示的字段；未识别类型返回 null，前端降级成"作者+文字"
@@ -3115,6 +3143,15 @@ function dynCard(major) {
   };
 }
 
+// 评论区对象：图文/相簿动态的评论挂在 basic.comment_id_str + comment_type（11）上，其余动态是 动态id + 17
+function dynCommentTarget(item) {
+  const b = item.basic || {};
+  const oid = String(b.comment_id_str || "");
+  const type = Number(b.comment_type) || 0;
+  if (/^\d{1,20}$/.test(oid) && [1, 11, 12, 17].includes(type)) return { oid, type };
+  return { oid: String(item.id_str), type: 17 };
+}
+
 function dynMap(item) {
   if (!item || !item.id_str) return null;
   const modules = item.modules || {};
@@ -3155,7 +3192,10 @@ function dynMap(item) {
     stat: {
       like: Number(st.like?.count) || 0, liked: !!st.like?.status,
       comment: Number(st.comment?.count) || 0, forward: Number(st.forward?.count) || 0,
+      coin: Number(st.coin?.count) || 0, coined: !!st.coin?.status,
+      fav: Number(st.favorite?.count) || 0, faved: !!st.favorite?.status,
     },
+    comment: dynCommentTarget(item),
     foldStatement: dynEsc(modules.module_fold?.statement),
     dispute: modules.module_dispute?.title ? dynEsc(modules.module_dispute.title) : "",
   };
@@ -3232,6 +3272,233 @@ app.post("/api/dynamics/like", async (req, res) => {
   }
 });
 
+
+// 转发：先只保留接口（前端按钮已经接上这个地址）。
+// 以后要做的话上游是 POST x/dynamic/feed/create/dyn?csrf=...（scene=4 表示转发，带 dyn_req.content 与 rid=原动态 id）。
+app.post("/api/dynamics/forward", (req, res) => {
+  res.status(501).json({ error: "转发功能暂未开放" });
+});
+
+// ---- 图文（opus）----
+function dynParaNodes(nodes) {
+  return (nodes || []).map((n) => {
+    if (n && n.type === "TEXT_NODE_TYPE_WORD") {
+      let t = dynEsc(n.word?.words);
+      if (n.word?.style?.bold) t = `<b>${t}</b>`;
+      return t;
+    }
+    if (n && n.type === "TEXT_NODE_TYPE_RICH" && n.rich) return dynRichNodeHtml(n.rich);
+    return "";
+  }).join("");
+}
+
+function dynOpusBlocks(paragraphs) {
+  const blocks = [];
+  for (const p of paragraphs || []) {
+    const t = p.para_type;
+    // 按 payload 识别段落而不是死抠 para_type：B 站还在新增段落类型（heading 等），
+    // 只要带 text/pic/list 就渲染，未知类型顶多被跳过，不再整段丢失。
+    if (p.text && Array.isArray(p.text.nodes)) {
+      const html = dynParaNodes(p.text.nodes);
+      if (html) blocks.push({ type: t === 4 ? "quote" : "text", html });
+    } else if (p.pic && Array.isArray(p.pic.pics) && p.pic.pics.length) {
+      const images = p.pic.pics.map((x) => dynImage(x.url, x.width, x.height)).filter(Boolean);
+      if (images.length) blocks.push({ type: "images", images });
+    } else if (t === 3) {
+      blocks.push({ type: "line" });
+    } else if (p.list && Array.isArray(p.list.items)) {
+      const items = p.list.items.map((it) => dynParaNodes(it.nodes)).filter(Boolean);
+      if (items.length) blocks.push({ type: "list", items });
+    } else if (p.blockquote && Array.isArray(p.blockquote.paragraphs)) {
+      const html = dynOpusBlocks(p.blockquote.paragraphs).map((b) => (b.html || "")).join("");
+      if (html) blocks.push({ type: "quote", html });
+    }
+  }
+  return blocks;
+}
+
+// 主页"图文"标签用的列表项
+function dynOpusListItem(it) {
+  const id = String(it.opus_id || it.id_str || "");
+  if (!id) return null;
+  const cov = it.cover;
+  const cover = normalizeImgUrl((cov && typeof cov === "object" ? cov.url : cov) || "");
+  return {
+    id,
+    title: dynEsc(it.title),
+    text: dynEsc(dynOneLine(it.content || it.summary?.text || "")),
+    cover,
+    like: it.stat?.like ?? "",
+    view: it.stat?.view ?? "",
+    url: `/opus?id=${id}`,
+  };
+}
+
+app.get("/api/user/:mid/opus", async (req, res) => {
+  const mid = parseInt(req.params.mid, 10) || 0;
+  if (!mid) return res.status(400).json({ error: "无效的 mid" });
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const offset = String(req.query.offset || "").trim().slice(0, 40);
+  const session = getSession(req);
+
+  let failed = null;
+  // 首选：空间页"图文"标签用的 opus/feed/space
+  try {
+    const j = await biliSignedGet("https://api.bilibili.com/x/polymer/web-dynamic/v1/opus/feed/space", {
+      host_mid: String(mid), page: String(page), offset, type: "article", web_location: "333.1387", ...SPACE_DM_PARAMS,
+    }, session);
+    if (j.code === 0 && Array.isArray(j.data?.items)) {
+      const list = j.data.items.map(dynOpusListItem).filter(Boolean);
+      return res.json({ list, hasMore: !!j.data.has_more, offset: j.data.offset || "", page });
+    }
+    failed = { code: j.code, message: j.message };
+  } catch (e) { failed = { code: -1, message: e.message }; }
+
+  // 兜底：整个空间动态流里只留图文/相簿动态（拿不到页码，只支持用 offset 往后翻）
+  try {
+    const j = await biliSignedGet("https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space", {
+      host_mid: String(mid), offset, timezone_offset: "-480", platform: "web",
+      features: "itemOpusStyle,listOnlyfans,opusBigCover,onlyfansVote", web_location: "333.999", ...SPACE_DM_PARAMS,
+    }, session);
+    if (j.code === 0 && Array.isArray(j.data?.items)) {
+      const list = j.data.items.map(dynMap).filter((d) => d && !d.forward && d.images.length)
+        .map((d) => ({ id: d.id, title: d.title, text: d.text.replace(/<[^>]+>/g, ""), cover: d.images[0].url, like: d.stat.like, view: "", url: `/opus?id=${d.id}` }));
+      return res.json({ list, hasMore: !!j.data.has_more, offset: j.data.offset || "", page, fallback: true });
+    }
+    failed = { code: j.code, message: j.message };
+  } catch (e) { failed = { code: -1, message: e.message }; }
+  res.status(502).json({ code: failed?.code, error: spaceErrorText(failed?.code, failed?.message || "图文获取失败") });
+});
+
+// 图文详情：先走 opus/detail（段落结构完整），失败再用动态详情兜底（只有正文+图片）
+app.get("/api/opus", async (req, res) => {
+  const id = String(req.query.id || "").trim();
+  if (!/^\d{1,20}$/.test(id)) return res.status(400).json({ error: "缺少或无效的图文 id" });
+  const session = getSession(req);
+  try {
+    const u = new URL("https://api.bilibili.com/x/polymer/web-dynamic/v1/opus/detail");
+    u.searchParams.set("id", id);
+    u.searchParams.set("timezone_offset", "-480");
+    u.searchParams.set("features", "onlyfansVote,onlyfansAssetsV2,decorationCard,htmlNewStyle,ugcDelete,editable,opusPrivateVisible");
+    const j = await (await biliFetch(u.toString(), {}, session)).json();
+    const item = j.code === 0 ? j.data?.item : null;
+    if (item) {
+      // modules 可能是数组（[{module_type, module_xxx}]）也可能是对象，统一成对象
+      let mods = item.modules || {};
+      if (Array.isArray(mods)) {
+        // 数组形态：每个元素都带全套 module_* key（其余为 null），只挑非空的收进来，
+        // 否则后一个模块的 null 会把前面已收到的有效模块覆盖掉（曾导致 module_content 被清空、
+        // 图文详情退化为动态摘要兜底 → 正文截断 / 图片只剩 [图片] 占位）。
+        const o = {};
+        for (const m of mods) {
+          if (!m) continue;
+          for (const k of Object.keys(m)) {
+            if (k.startsWith("module_") && k !== "module_type" && m[k] != null) o[k] = m[k];
+          }
+        }
+        mods = o;
+      }
+      const a = mods.module_author || {};
+      const content = mods.module_content || {};
+      const blocks = dynOpusBlocks(content.paragraphs);
+      const st = mods.module_stat || {};
+      if (blocks.length) {
+        return res.json({
+          id, url: `https://www.bilibili.com/opus/${id}`,
+          title: dynEsc(mods.module_title?.text || ""),
+          author: { mid: a.mid || 0, name: dynEsc(a.name), face: normalizeImgUrl(a.face || ""), time: a.pub_time || "", ts: Number(a.pub_ts) || 0 },
+          blocks,
+          stat: {
+            like: Number(st.like?.count) || 0, liked: !!st.like?.status,
+            comment: Number(st.comment?.count) || 0, forward: Number(st.forward?.count) || 0,
+            coin: Number(st.coin?.count) || 0, coined: !!st.coin?.status,
+            fav: Number(st.favorite?.count) || 0, faved: !!st.favorite?.status,
+          },
+          comment: dynCommentTarget(item),
+        });
+      }
+    }
+    // 兜底：动态详情
+    const du = new URL("https://api.bilibili.com/x/polymer/web-dynamic/v1/detail");
+    du.searchParams.set("id", id);
+    du.searchParams.set("timezone_offset", "-480");
+    du.searchParams.set("features", "itemOpusStyle");
+    const dj = await (await biliFetch(du.toString(), {}, session)).json();
+    if (dj.code !== 0 || !dj.data?.item) return res.status(502).json({ error: dynErrorText(dj.code, "图文加载失败，可能已被删除") });
+    const d = dynMap(dj.data.item);
+    if (!d) return res.status(404).json({ error: "没有找到这篇图文" });
+    const blocks = [];
+    if (d.text) blocks.push({ type: "text", html: d.text });
+    if (d.images.length) blocks.push({ type: "images", images: d.images });
+    res.json({ id, url: d.url, title: d.title, author: d.author, blocks, stat: d.stat, comment: d.comment, fallback: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "图文加载失败（网络异常）" });
+  }
+});
+
+// 图文投币：图文（专栏型 opus，comment_type=12）投币走老接口 x/web-interface/coin/add，
+// avtype=2 表示专栏/图文，aid=专栏 id（即 comment_id_str），与视频投币同源（见接口清单 coinArticle）。
+app.post("/api/opus/coin", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  const oid = String(req.body.oid || "").trim();
+  const upid = parseInt(req.body.upid, 10) || 0;
+  const multiply = Math.min(2, Math.max(1, parseInt(req.body.multiply, 10) || 1));
+  const selectLike = req.body.select_like ? "1" : "0";
+  if (!/^\d{1,20}$/.test(oid)) return res.status(400).json({ error: "缺少图文 id" });
+  if (!session.cookies.bili_jct) return res.status(401).json({ code: -111, error: "缺少 CSRF 凭据，请重新登录" });
+  try {
+    const body = new URLSearchParams({
+      aid: oid, multiply: String(multiply),
+      avtype: "2", select_like: selectLike, cross_domain: "true",
+      csrf: session.cookies.bili_jct || "",
+    });
+    if (upid) body.set("upid", String(upid));
+    const j = await (await biliFetch("https://api.bilibili.com/x/web-interface/coin/add", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://www.bilibili.com",
+        Referer: `https://www.bilibili.com/opus/${oid}`,
+      },
+      body,
+    }, session)).json();
+    if (j.code !== 0) return res.status(502).json({ code: j.code, error: coinErrorText(j.code, j.message) });
+    res.json({ ok: true, multiply });
+  } catch (e) {
+    console.error("图文投币异常:", e);
+    res.status(500).json({ error: "投币操作失败（网络异常）" });
+  }
+});
+
+// 图文收藏/取消收藏：专栏型 opus 走专栏独立接口 x/article/favorites/add|del（未并入 v3/fav 体系）
+app.post("/api/opus/fav", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  const oid = String(req.body.oid || "").trim();
+  const on = !!req.body.on;
+  if (!/^\d{1,20}$/.test(oid)) return res.status(400).json({ error: "缺少图文 id" });
+  if (!session.cookies.bili_jct) return res.status(401).json({ code: -111, error: "缺少 CSRF 凭据，请重新登录" });
+  try {
+    const body = new URLSearchParams({ id: oid, csrf: session.cookies.bili_jct || "" });
+    const j = await (await biliFetch(`https://api.bilibili.com/x/article/favorites/${on ? "add" : "del"}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://www.bilibili.com",
+        Referer: `https://www.bilibili.com/opus/${oid}`,
+      },
+      body,
+    }, session)).json();
+    if (j.code !== 0) return res.status(502).json({ code: j.code, error: j.message || (on ? "收藏失败" : "取消收藏失败") });
+    res.json({ ok: true, on });
+  } catch (e) {
+    console.error("图文收藏异常:", e);
+    res.status(500).json({ error: "收藏操作失败（网络异常）" });
+  }
+});
+
 // ----------------------------- 环境诊断（排查平板/WebView 登录问题） -----------------------------
 app.get("/api/diag/set-cookie", (req, res) => {
   res.cookie("diag_cookie", "ok", { httpOnly: true, path: "/", maxAge: 60000, sameSite: "lax" });
@@ -3258,6 +3525,7 @@ app.get("/stream", (req, res) => res.sendFile(path.join(__dirname, "public", "st
 app.get("/message", (req, res) => res.sendFile(path.join(__dirname, "public", "message.html")));
 app.get("/settings", (req, res) => res.sendFile(path.join(__dirname, "public", "settings.html")));
 app.get("/dynamic", (req, res) => res.sendFile(path.join(__dirname, "public", "dynamic.html")));
+app.get("/opus", (req, res) => res.sendFile(path.join(__dirname, "public", "opus.html")));
 
 // ----------------------------- 直播弹幕转发（WebSocket） -----------------------------
 // 浏览器不方便直接连 B 站直播弹幕协议（二进制帧），所以由服务端先调 getDanmuInfo
