@@ -3334,6 +3334,28 @@ function dynOpusListItem(it) {
   };
 }
 
+// 浏览数批量补齐：x/article/cards 按 cv id 批量查（一次请求覆盖整页），返回
+// stats.view/reply + publish_time。匿名实测可用；失败则静默，卡片只少显示浏览数。
+async function opusListBatchViews(list, mid, session) {
+  const cv = list.filter((x) => x.cvid).map((x) => "cv" + x.cvid);
+  if (!cv.length) return;
+  try {
+    const u = new URL("https://api.bilibili.com/x/article/cards");
+    u.searchParams.set("ids", cv.join(","));
+    const j = await (await biliFetch(u.toString(), {
+      headers: { Referer: `https://space.bilibili.com/${mid}/opus` },
+    }, session)).json();
+    if (j.code !== 0 || !j.data) return;
+    for (const x of list) {
+      const c = j.data["cv" + x.cvid] || j.data[x.cvid];
+      if (!c) continue;
+      x.view = Number(c.stats?.view) || 0;
+      if (!x.comment) x.comment = Number(c.stats?.reply) || 0;
+      if (!x.ts) x.ts = Number(c.publish_time) || 0;
+    }
+  } catch (e) { /* 静默 */ }
+}
+
 app.get("/api/user/:mid/opus", async (req, res) => {
   const mid = parseInt(req.params.mid, 10) || 0;
   if (!mid) return res.status(400).json({ error: "无效的 mid" });
@@ -3342,7 +3364,49 @@ app.get("/api/user/:mid/opus", async (req, res) => {
   const session = getSession(req);
 
   let failed = null;
-  // 首选：空间页"图文"标签用的 opus/feed/space
+  // 首选：空间动态流过滤出图文（MAJOR_TYPE_OPUS）。一条动态能同时拿到
+  // 专栏 id（=basic.comment_id_str）、评论数、发布时间，再用 cards 批量补浏览数。
+  // 每次最多向后翻 3 页动态，攒够 12 条图文就收手，offset 交给前端续翻。
+  try {
+    let list = [], off = offset, hasMore = false, done = false;
+    for (let i = 0; i < 3 && list.length < 12 && !done; i++) {
+      const j = await biliSignedGet("https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space", {
+        host_mid: String(mid), offset: off, timezone_offset: "-480", platform: "web",
+        features: "itemOpusStyle,listOnlyfans,opusBigCover,onlyfansVote", web_location: "333.999", ...SPACE_DM_PARAMS,
+      }, session);
+      if (j.code !== 0 || !Array.isArray(j.data?.items)) { failed = { code: j.code, message: j.message }; break; }
+      for (const it of j.data.items) {
+        const modules = it.modules || {};
+        const major = modules.module_dynamic?.major;
+        if (!major || major.type !== "MAJOR_TYPE_OPUS" || !major.opus) continue;
+        const o = major.opus;
+        const om = String(o.jump_url || "").match(/opus\/(\d+)/);
+        const opusId = om ? om[1] : it.id_str;
+        const cvid = String(it.basic?.comment_id_str || "");
+        list.push({
+          id: opusId,
+          title: dynEsc(o.title || ""),
+          text: dynEsc(dynOneLine(o.summary?.text || "")),
+          cover: normalizeImgUrl((o.pics || [])[0]?.url || ""),
+          like: Number(modules.module_stat?.like?.count) || 0,
+          comment: Number(modules.module_stat?.comment?.count) || 0,
+          ts: Number(modules.module_author?.pub_ts) || 0,
+          cvid: /^\d{1,20}$/.test(cvid) ? cvid : "",
+          view: 0,
+          url: `/opus?id=${opusId}`,
+        });
+      }
+      hasMore = !!j.data.has_more;
+      off = j.data.offset || "";
+      if (!hasMore) done = true;
+    }
+    if (list.length || done || !failed) {
+      await opusListBatchViews(list, mid, session);
+      return res.json({ list, hasMore, offset: off, page });
+    }
+  } catch (e) { failed = { code: -1, message: e.message }; }
+
+  // 兜底1：空间页"图文"标签用的 opus/feed/space（拿不到浏览/评论/日期，但保住列表）
   try {
     const j = await biliSignedGet("https://api.bilibili.com/x/polymer/web-dynamic/v1/opus/feed/space", {
       host_mid: String(mid), page: String(page), offset, type: "article", web_location: "333.1387", ...SPACE_DM_PARAMS,
@@ -3354,7 +3418,7 @@ app.get("/api/user/:mid/opus", async (req, res) => {
     failed = { code: j.code, message: j.message };
   } catch (e) { failed = { code: -1, message: e.message }; }
 
-  // 兜底：整个空间动态流里只留图文/相簿动态（拿不到页码，只支持用 offset 往后翻）
+  // 兜底2：老的空间动态流映射（评论数/日期有，浏览数没有）
   try {
     const j = await biliSignedGet("https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space", {
       host_mid: String(mid), offset, timezone_offset: "-480", platform: "web",
@@ -3362,13 +3426,28 @@ app.get("/api/user/:mid/opus", async (req, res) => {
     }, session);
     if (j.code === 0 && Array.isArray(j.data?.items)) {
       const list = j.data.items.map(dynMap).filter((d) => d && !d.forward && d.images.length)
-        .map((d) => ({ id: d.id, title: d.title, text: d.text.replace(/<[^>]+>/g, ""), cover: d.images[0].url, like: d.stat.like, view: "", url: `/opus?id=${d.id}` }));
+        .map((d) => ({ id: d.id, title: d.title, text: d.text.replace(/<[^>]+>/g, ""), cover: d.images[0].url, like: d.stat.like, comment: d.stat.comment, view: "", ts: Number(d.author?.ts) || 0, url: `/opus?id=${d.id}` }));
       return res.json({ list, hasMore: !!j.data.has_more, offset: j.data.offset || "", page, fallback: true });
     }
     failed = { code: j.code, message: j.message };
   } catch (e) { failed = { code: -1, message: e.message }; }
   res.status(502).json({ code: failed?.code, error: spaceErrorText(failed?.code, failed?.message || "图文获取失败") });
 });
+
+// 图文浏览数：opus/detail 的 module_stat 没有阅读量；专栏型图文（comment_type=12）
+// 再查一发 x/article/view 拿 stats.view。失败返回 0，不影响页面主体。
+async function opusArticleView(oid, session) {
+  if (!/^\d{1,20}$/.test(String(oid || ""))) return 0;
+  try {
+    const u = new URL("https://api.bilibili.com/x/article/view");
+    u.searchParams.set("id", String(oid));
+    const j = await (await biliFetch(u.toString(), {
+      headers: { Referer: `https://www.bilibili.com/read/cv${oid}` },
+    }, session)).json();
+    if (j.code === 0 && j.data) return Number(j.data.stats?.view) || 0;
+  } catch (e) { /* 静默：浏览数拿不到就显示 0 */ }
+  return 0;
+}
 
 // 图文详情：先走 opus/detail（段落结构完整），失败再用动态详情兜底（只有正文+图片）
 app.get("/api/opus", async (req, res) => {
@@ -3402,7 +3481,10 @@ app.get("/api/opus", async (req, res) => {
       const content = mods.module_content || {};
       const blocks = dynOpusBlocks(content.paragraphs);
       const st = mods.module_stat || {};
+      const ct = dynCommentTarget(item);
       if (blocks.length) {
+        // 浏览数补查：见 opusArticleView
+        const view = ct.type === 12 ? await opusArticleView(ct.oid, session) : 0;
         return res.json({
           id, url: `https://www.bilibili.com/opus/${id}`,
           title: dynEsc(mods.module_title?.text || ""),
@@ -3413,8 +3495,9 @@ app.get("/api/opus", async (req, res) => {
             comment: Number(st.comment?.count) || 0, forward: Number(st.forward?.count) || 0,
             coin: Number(st.coin?.count) || 0, coined: !!st.coin?.status,
             fav: Number(st.favorite?.count) || 0, faved: !!st.favorite?.status,
+            view,
           },
-          comment: dynCommentTarget(item),
+          comment: ct,
         });
       }
     }
@@ -3430,6 +3513,7 @@ app.get("/api/opus", async (req, res) => {
     const blocks = [];
     if (d.text) blocks.push({ type: "text", html: d.text });
     if (d.images.length) blocks.push({ type: "images", images: d.images });
+    d.stat.view = d.comment?.type === 12 ? await opusArticleView(d.comment.oid, session) : 0;
     res.json({ id, url: d.url, title: d.title, author: d.author, blocks, stat: d.stat, comment: d.comment, fallback: true });
   } catch (e) {
     console.error(e);
