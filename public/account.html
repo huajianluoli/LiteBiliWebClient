@@ -1057,12 +1057,17 @@ const OPUS_DEFAULT_COVER = '/images/opus_cover.jpg';
 function opusCardHTML(o) {
   const title = o.title || o.text || '图文';
   const sub = o.title ? o.text : '';
-  const stat = [o.view ? `${esc(o.view)} 浏览` : '', o.like !== '' && o.like != null ? `${fmtCount(o.like)} 赞` : ''].filter(Boolean).join(' · ');
+  // 统计行与视频卡片同款：浏览 · 评论 · 赞 · 日期
+  const stat = [];
+  if (Number(o.view) > 0) stat.push(`${fmtCount(o.view)} 浏览`);
+  if (Number(o.comment) > 0) stat.push(`${fmtCount(o.comment)} 评论`);
+  if (Number(o.like) > 0) stat.push(`${fmtCount(o.like)} 赞`);
+  if (o.ts) stat.push(fmtDate(o.ts));
   return `<a class="opus-card" href="${esc(o.url)}">
     <span class="opus-cover"><img src="${esc(o.cover || OPUS_DEFAULT_COVER)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="if(this.src.indexOf('opus_cover')<0){this.src='${OPUS_DEFAULT_COVER}'}else{this.style.visibility='hidden'}"></span>
     <span class="opus-title">${title}</span>
     ${sub ? `<span class="opus-sub">${sub}</span>` : ''}
-    ${stat ? `<span class="opus-stat">${stat}</span>` : ''}
+    ${stat.length ? `<span class="opus-stat">${stat.join(' · ')}</span>` : ''}
   </a>`;
 }
 
