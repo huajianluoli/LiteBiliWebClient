@@ -1655,9 +1655,30 @@
             if (!_deviceId) { _deviceId = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('bili_device_id', _deviceId); }
         } catch (e) {}
 
+        // —— App 登录态（番剧高清用）：TV 端扫码拿到的 access_token，存 bili_app_tokens ——
+        // 请求番剧 App 播放接口时用 X-Bili-Access-Key 头带回。
+        // 注意：每次实时读 localStorage——用户可能在别的页面（设置页）扫码登录，
+        // 本页先开着时不能沿用页面加载时的旧值。
+        function _getAppToken() {
+            try {
+                const t = JSON.parse(localStorage.getItem('bili_app_tokens') || 'null');
+                return t && t.access_token ? t : null;
+            } catch (e) { return null; }
+        }
+
         // —— 视频流格式：设置页"视频流格式"单选（bili_stream_mode），默认 dash ——
         function _streamMode() {
             try { return localStorage.getItem('bili_stream_mode') === 'durl' ? 'durl' : 'dash'; } catch (e) { return 'dash'; }
+        }
+
+        // —— 番剧 dash 拉流方式：设置页"番剧播放"（bili_pgc_proxy），默认 proxy（后端代理）——
+        function _pgcProxyMode() {
+            try { return localStorage.getItem('bili_pgc_proxy') === 'direct' ? 'direct' : 'proxy'; } catch (e) { return 'proxy'; }
+        }
+
+        // —— 番剧入口：设置页"番剧播放"（bili_pgc_entry），默认 ep（分集 + SSR 1080P）——
+        function _pgcEntry() {
+            try { return localStorage.getItem('bili_pgc_entry') === 'bv' ? 'bv' : 'ep'; } catch (e) { return 'ep'; }
         }
 
         const _origFetch = window.fetch.bind(window);
@@ -1667,6 +1688,8 @@
             const setH = (k, v) => { if (opts.headers instanceof Headers) opts.headers.set(k, v); else opts.headers = Object.assign({}, opts.headers), opts.headers[k] = v; };
             if (_deviceId) setH('X-Device-Id', _deviceId);
             if (ch) setH('X-Bili-Cookie', ch);
+            const at = _getAppToken();
+            if (at) setH('X-Bili-Access-Key', at.access_token);
             return _origFetch(input, opts);
         };
 
@@ -1865,10 +1888,12 @@
             episodeList.innerHTML = '';
             eps.forEach((item) => {
                 const el = document.createElement('div');
-                el.className = 'episode-item' + (item.bvid === activeBvid ? ' active' : '');
+                // 高亮按当前 ep_id 匹配（分 P 各集 bvid 可能相同，用 bvid 判断会全部/首集高亮）
+                el.className = 'episode-item' + (item.epId === window._curEpId ? ' active' : '');
                 el.textContent = `${item.title}${item.longTitle ? ' ' + item.longTitle : ''}`;
                 el.onclick = () => {
                     if (item.bvid) {
+                        window._curEpId = item.epId; // 番剧 App 接口按 ep_id 取流，切分集必须同步
                         document.getElementById('vidInput').value = item.bvid;
                         startPlay();
                     }
@@ -3261,11 +3286,11 @@
             // 非 DASH 时兼容两种来源：显式 url（降级时）或 fallbackUrl（纯 durl 视频）
             let videoUrl = isDash ? playInfo.dash.video : (playInfo.url || playInfo.fallbackUrl);
             // 代理条件（不占服务器带宽优先）：
-            // 1) 番剧 PGC 的 MP4 直链需要 Referer，必须走后端代理；
-            // 2) 用户设置"视频流格式 = durl"时主动走后端代理（兼容受限网络/防盗链）。
+            // 1) 番剧 PGC：按设置决定——默认后端代理（防盗链/受限网络稳），可改 CDN 直连；
+            // 2) 用户设置"视频流格式 = durl"时强制走后端代理（兼容受限网络/防盗链）。
             // 普通视频的 durl 直链只校验 UA，浏览器直连即可，不再默认代理。
-            const proxyDurl = (playInfo.isPgc || _streamMode() === 'durl') &&
-                !isDash && videoUrl && videoUrl.includes('bilivideo.com');
+            const proxyDurl = ((playInfo.isPgc && _pgcProxyMode() === 'proxy') || _streamMode() === 'durl') &&
+                videoUrl && videoUrl.includes('bilivideo.com');
             if (proxyDurl) {
                 videoUrl = '/api/video/proxy?src=' + encodeURIComponent(videoUrl);
             }
@@ -3359,7 +3384,12 @@
 
             // DASH：创建隐藏的 Audio 同步音频流
             if (isDash && playInfo.dash.audio) {
-                dashAudio = new Audio(playInfo.dash.audio);
+                let dashAudioSrc = playInfo.dash.audio;
+                // 番剧 dash 音频流按设置走后端代理（与视频流一致）；durl 模式强制代理
+                if (((playInfo.isPgc && _pgcProxyMode() === 'proxy') || _streamMode() === 'durl') && dashAudioSrc && dashAudioSrc.includes('bilivideo.com')) {
+                    dashAudioSrc = '/api/video/proxy?src=' + encodeURIComponent(dashAudioSrc);
+                }
+                dashAudio = new Audio(dashAudioSrc);
                 dashAudio.preload = 'auto';
                 dashAudio.crossOrigin = 'anonymous';
 
@@ -3449,7 +3479,10 @@
             try {
                 const paramKey = currentBvid ? 'bv' : 'av';
                 const paramVal = currentBvid || currentAid;
-                const url = `/api/play?${paramKey}=${encodeURIComponent(paramVal)}&p=${currentPage || 1}&qn=${encodeURIComponent(qn)}&stream=${_streamMode()}`;
+                const isBangumi = !!(window._episodes && window._episodes.length);
+                // 番剧统一走网页接口：带 ep_id 时后端走 SSR 提取拿 1080P（App 扫码登录入口已移除）
+                const epQ = (isBangumi && window._curEpId) ? `&ep=${encodeURIComponent(window._curEpId)}` : '';
+                const url = `/api/play?${paramKey}=${encodeURIComponent(paramVal)}&p=${currentPage || 1}&qn=${encodeURIComponent(qn)}&stream=${_streamMode()}${epQ}`;
                 const res = await fetch(url);
                 const data = await res.json();
                 if (!res.ok || data.code !== 0) throw new Error(data.message || '切换清晰度失败');
@@ -3888,7 +3921,10 @@
             let paramType = input.toLowerCase().startsWith('av') ? 'av' : 'bv';
             let cleanId = input.replace(/av/i, '');
 
-            const apiUrl = `/api/play?${paramType}=${cleanId}&p=${p}&stream=${_streamMode()}`;
+            const isBangumi = !!(window._episodes && window._episodes.length);
+            // 番剧统一走网页接口：带 ep_id 时后端走 SSR 提取拿 1080P（App 扫码登录入口已移除）
+            const epQ = (isBangumi && window._curEpId) ? `&ep=${encodeURIComponent(window._curEpId)}` : '';
+            const apiUrl = `/api/play?${paramType}=${cleanId}&p=${p}&stream=${_streamMode()}${epQ}`;
             const infoUrl = `/api/info?${paramType}=${cleanId}`;
 
             fetch(infoUrl)
@@ -3949,7 +3985,7 @@
             loadComments(paramType, cleanId);
 
             try {
-                const response = await fetch(apiUrl);
+                let response = await fetch(apiUrl);
                 let jsonData;
                 try {
                     jsonData = await response.json();
@@ -4008,8 +4044,9 @@
             const t = parseInt(params.get('t'), 10);
             if (t > 0) pendingSeekSeconds = t;
 
-            if (ep) {
+            if (ep && _pgcEntry() === 'ep') {
                 // 番剧：先解析 ep_id 拿 bvid 和分集列表
+                window._curEpId = parseInt(ep, 10) || 0; // 番剧 App 接口按 ep_id 取流
                 try {
                     const r = await fetch(`/api/ep2bv?ep=${ep}`);
                     const d = await r.json();

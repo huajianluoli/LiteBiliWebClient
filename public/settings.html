@@ -256,6 +256,43 @@
   </div>
 
   <div class="settings-card">
+    <h2>番剧播放</h2>
+    <p class="desc">番剧高清流默认走后端代理拉取（兼容防盗链/受限网络），可改 CDN 直连省服务器带宽。番剧入口默认用 ep_id（分集完整 + SSR 1080P）。</p>
+    <div class="radio-group" id="pgcProxyRadioGroup">
+      <label class="radio-option" data-value="proxy">
+        <input type="radio" name="pgcProxyMode" value="proxy">
+        <div class="radio-option-body">
+          <div class="radio-option-title">后端代理（推荐）</div>
+          <div class="radio-option-desc">番剧音视频流经服务器代理，防盗链/受限网络都能播；会占用服务器带宽</div>
+        </div>
+      </label>
+      <label class="radio-option" data-value="direct">
+        <input type="radio" name="pgcProxyMode" value="direct">
+        <div class="radio-option-body">
+          <div class="radio-option-title">CDN 直连</div>
+          <div class="radio-option-desc">番剧音视频直连 B 站 CDN，不占服务器带宽；部分网络/防盗链环境可能播不了</div>
+        </div>
+      </label>
+    </div>
+    <div class="radio-group" id="pgcEntryRadioGroup" style="margin-top:14px">
+      <label class="radio-option" data-value="ep">
+        <input type="radio" name="pgcEntry" value="ep">
+        <div class="radio-option-body">
+          <div class="radio-option-title">ep 入口（推荐）</div>
+          <div class="radio-option-desc">番剧链接带 ep_id 进入：完整分集 + SSR 1080P</div>
+        </div>
+      </label>
+      <label class="radio-option" data-value="bv">
+        <input type="radio" name="pgcEntry" value="bv">
+        <div class="radio-option-body">
+          <div class="radio-option-title">bv 入口</div>
+          <div class="radio-option-desc">番剧链接只用 bvid 进入：单集播放、多 P 列表</div>
+        </div>
+      </label>
+    </div>
+  </div>
+
+  <div class="settings-card">
     <h2>消息页背景图</h2>
     <p class="desc">给整个"消息"页面设置一张背景图，留空则使用默认背景。</p>
     <input type="text" class="settings-input" id="msgBgUrl" placeholder="https://example.com/background.jpg">
@@ -469,6 +506,49 @@ document.getElementById('msgBgClearBtn').addEventListener('click', () => {
   try { localStorage.removeItem('bili_msg_bg'); } catch (e) {}
   updateMsgBgPreview();
   flashSaved(msgBgSaveHint);
+});
+
+/* ============ 番剧播放设置 ============ */
+// 番剧 dash 拉流方式：proxy（后端代理，默认）/ direct（CDN 直连）
+const pgcProxyGroup = document.getElementById('pgcProxyRadioGroup');
+let pgcProxyMode = 'proxy';
+try { pgcProxyMode = localStorage.getItem('bili_pgc_proxy') || 'proxy'; } catch (e) {}
+if (pgcProxyMode !== 'proxy' && pgcProxyMode !== 'direct') pgcProxyMode = 'proxy';
+// 番剧入口：ep（默认，分集+SSR 1080P）/ bv（只用 bvid 单集进入）
+const pgcEntryGroup = document.getElementById('pgcEntryRadioGroup');
+let pgcEntry = 'ep';
+try { pgcEntry = localStorage.getItem('bili_pgc_entry') || 'ep'; } catch (e) {}
+if (pgcEntry !== 'ep' && pgcEntry !== 'bv') pgcEntry = 'ep';
+
+function bindRadioGroup(group, key, getVal, setVal) {
+  function updateUI() {
+    group.querySelectorAll('.radio-option').forEach(opt => {
+      const active = opt.dataset.value === getVal();
+      opt.classList.toggle('active', active);
+      opt.querySelector('input').checked = active;
+    });
+  }
+  updateUI();
+  group.querySelectorAll('input[type="radio"]').forEach(input => {
+    input.addEventListener('change', () => {
+      setVal(input.value);
+      updateUI();
+    });
+  });
+  group.querySelectorAll('.radio-option').forEach(opt => {
+    opt.addEventListener('click', (e) => {
+      const input = opt.querySelector('input');
+      if (!input.checked) { input.checked = true; input.dispatchEvent(new Event('change')); }
+    });
+  });
+}
+bindRadioGroup(pgcProxyGroup, 'bili_pgc_proxy', () => pgcProxyMode, (v) => {
+  pgcProxyMode = v;
+  try { localStorage.setItem('bili_pgc_proxy', v); } catch (e) {}
+});
+bindRadioGroup(pgcEntryGroup, 'bili_pgc_entry', () => pgcEntry, (v) => {
+  pgcEntry = v;
+  try { localStorage.setItem('bili_pgc_entry', v); } catch (e) {}
 });
 </script>
 <script src="/msg-badge.js" defer></script>

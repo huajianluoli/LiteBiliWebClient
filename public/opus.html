@@ -51,6 +51,11 @@
   .op-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .op-name { font-size: 15px; font-weight: 600; }
   .op-name:hover { color: var(--pink); }
+  .op-author-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .op-follow { border: none; background: var(--blue); color: #fff; font-size: 12px; padding: 4px 14px; border-radius: 999px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+  .op-follow:hover { opacity: .88; }
+  .op-follow.followed { background: var(--bg); color: var(--text-3); }
+  .op-follow.busy { opacity: .5; pointer-events: none; }
   .op-time { margin-top: 3px; font-size: 12px; color: var(--text-3); }
   .op-body { padding: 18px 0 8px; font-size: 16px; line-height: 1.85; }
   .op-body p { margin: 0 0 16px; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
@@ -199,8 +204,7 @@ function showToast(text) {
 function fmtDate(ts) {
   if (!ts) return '';
   const d = new Date(ts * 1000), p = (n) => String(n).padStart(2, '0');
-  const y = d.getFullYear(), now = new Date().getFullYear();
-  return (y === now ? '' : y + '-') + `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 function absTime(ts) {  if (!ts) return '';
   const d = new Date(ts * 1000), p = (n) => String(n).padStart(2, '0');
@@ -306,16 +310,66 @@ async function init() {
     <div class="op-meta"><span class="op-views">${fmtCount(d.stat.view || 0)} 浏览</span><span>${metaDate}</span></div>
     <div class="op-author">
       <a class="op-avatar" href="/account?mid=${esc(a.mid)}">${a.face ? `<img src="${esc(a.face)}" alt="" referrerpolicy="no-referrer">` : ''}</a>
-      <div><a class="op-name" href="/account?mid=${esc(a.mid)}">${a.name || '未知用户'}</a></div>
+      <div class="op-author-main">
+        <a class="op-name" href="/account?mid=${esc(a.mid)}">${a.name || '未知用户'}</a>
+        <button type="button" class="op-follow" id="opFollowBtn" style="display:none">关注</button>
+      </div>
     </div>
     <div class="op-body">${body || '<p style="color:var(--text-3)">这篇图文暂时没有可显示的内容</p>'}</div>
     <div class="op-foot">
-      <span class="op-cmt-txt" id="opCmtCount" title="评论数">${d.stat.comment ? fmtCount(d.stat.comment) : '评论'}</span>
+      <span class="op-cmt-txt" id="opCmtCount" title="评论数">共${fmtCount(d.stat.comment || 0)}条评论</span>
       <button type="button" class="op-stat${d.stat.liked ? ' active' : ''}" id="opLike">${IC_LIKE}<span>${d.stat.like ? fmtCount(d.stat.like) : '点赞'}</span></button>
       <button type="button" class="op-stat${d.stat.coined ? ' active' : ''}" id="opCoin"${triple ? '' : ' title="该图文暂不支持投币" disabled style="opacity:.45;cursor:not-allowed"'}>${IC_COIN}<span>${d.stat.coin ? fmtCount(d.stat.coin) : '投币'}</span></button>
       <button type="button" class="op-stat${d.stat.faved ? ' active' : ''}" id="opFav"${triple ? '' : ' title="该图文暂不支持收藏" disabled style="opacity:.45;cursor:not-allowed"'}>${IC_FAV}<span>${d.stat.fav ? fmtCount(d.stat.fav) : '收藏'}</span></button>
     </div>
     <div id="opComments"></div>`;
+
+  // —— UP 主关注键（参考 player.html 的关注实现，接口一致）——
+  const followBtn = document.getElementById('opFollowBtn');
+  const upMid = a.mid || 0;
+  if (upMid && m.loggedIn) {
+    if (myMid && myMid === Number(upMid)) {
+      followBtn.style.display = 'none'; // 自己的图文不显示关注键
+    } else {
+      followBtn.style.display = '';
+      let upFollowed = false;
+      const setFollowUI = (on) => {
+        upFollowed = !!on;
+        followBtn.classList.toggle('followed', upFollowed);
+        followBtn.textContent = upFollowed ? '已关注' : '关注';
+      };
+      // 查询当前关注状态
+      fetch(`/api/relation?mid=${encodeURIComponent(upMid)}`)
+        .then(r => r.json().catch(() => ({})))
+        .then(dd => { setFollowUI(!!dd.following); })
+        .catch(() => {});
+      followBtn.addEventListener('click', async () => {
+        if (followBtn.classList.contains('busy')) return;
+        const willFollow = !upFollowed;
+        if (!willFollow && !confirm(`确定不再关注「${a.name || '该UP主'}」吗？`)) return;
+        followBtn.classList.add('busy');
+        try {
+          const r = await fetch('/api/follow', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fid: upMid, act: willFollow ? 1 : 2 }),
+          });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            showToast(j.error || (willFollow ? '关注失败' : '取消关注失败'));
+            if (j.code === -101 || j.code === -111) setTimeout(() => location.href = '/account', 1500);
+            return;
+          }
+          setFollowUI(willFollow);
+          showToast(willFollow ? '关注成功' : '已取消关注');
+        } catch (e) {
+          showToast('操作失败：' + (e.message || '网络异常'));
+        } finally {
+          followBtn.classList.remove('busy');
+        }
+      });
+    }
+  }
 
   // 正文里的站内链接：跳主页/视频/图文的改成自家路由；其它指向 B 站的外链直接退化成纯文本
   internalizeLinks(wrap);

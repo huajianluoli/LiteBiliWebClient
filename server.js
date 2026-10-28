@@ -200,6 +200,31 @@ async function followLoginTicket(url) {
   return cookies;
 }
 
+// ---------------- 番剧高清：TV 端(aisee.tv 域)扫码登录 + App 播放接口 ----------------
+// 背景：2026 起 B 站把番剧(PGC)高清下发绑定"浏览器完整运行时环境"（JS/TLS 指纹等），
+// 后端用网页接口只能拿到 360P；App 端画质策略宽松（无浏览器风控），非大会员免费番通常 1080P。
+// 方案：TV 端扫码拿 access_key（对齐 BBDown：auth_code 从 passport.snm0516.aisee.tv 申请，
+// token 用 TV 版 appkey 签名验证，番剧播放走 api.snm0516.aisee.tv 域）。
+// 注意：之前用 bilibili.com 主域申请 + HD 版签名 → 番剧一律 suee（无流），
+// 原因就是"申请域/签名身份与 token 不匹配"；BBDown 用 aisee.tv 域 + TV 签名可正常拿番剧流。
+const TV_APPKEY = "4409e2ce8ffd12b8";
+const TV_APPSEC = "59b43e04ad6965f34319062b478f83dd";
+const TV_MOBI_APP = "android_tv_yst";
+const TV_UA = "Mozilla/5.0 (Linux; Android 11; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36";
+const TV_PASSPORT_HOST = "https://passport.snm0516.aisee.tv"; // TV 端扫码申请域
+const TV_API_HOST = "https://api.snm0516.aisee.tv";            // TV 端 API 域（番剧播放）
+
+// App 签名：参数(含 appkey+ts)按 key 字母序排序 → k=v join(&) → 尾部拼 appsec → MD5。
+// 参数值需 URL 编码（encodeURIComponent 语义，额外编码 !'()*），签名和发送都用同一份编码。
+function encAppValue(v) {
+  return encodeURIComponent(String(v)).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+}
+function appSign(params, appkey, appsec) {
+  const p = { ...params, appkey, ts: Math.floor(Date.now() / 1000) };
+  const qs = Object.keys(p).sort().map((k) => `${k}=${encAppValue(p[k])}`).join("&");
+  return { ...p, sign: crypto.createHash("md5").update(qs + appsec).digest("hex") };
+}
+
 // 会话识别：登录凭证由前端通过 X-Bili-Cookie 请求头携带，
 // 同时按 X-Device-Id 持久化到 data/cookies.json，服务器重启后自动恢复。
 function getSession(req) {
@@ -613,6 +638,161 @@ if (!cookies.SESSDATA) {
   }
 });
 
+// ---------------- App（TV 端扫码）登录：给番剧高清用 ----------------
+// 前端拿 dataURL 二维码展示，轮询通过后把 access_token 等存进 localStorage（bili_app_tokens），
+// 播放番剧时随 X-Bili-Access-Key 头带回。access_key 有效期 180 天。
+app.get("/api/app-login/qr", async (req, res) => {
+  try {
+    // BBDown 式 TV 登录：local_id 用随机设备 ID（不再固定 0），poll 必须沿用同一个
+    const localId = randomId(20);
+    const params = appSign({ local_id: localId }, TV_APPKEY, TV_APPSEC);
+    const body = Object.keys(params).sort().map((k) => `${k}=${encAppValue(params[k])}`).join("&");
+    const r = await fetch(`${TV_PASSPORT_HOST}/x/passport-tv-login/qrcode/auth_code`, {
+      method: "POST",
+      headers: { ...COMMON_HEADERS, "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      signal: AbortSignal.timeout(10000),
+    });
+    const j = await r.json();
+    if (j.code !== 0 || !j.data?.auth_code) {
+      return res.status(502).json({ error: j.message || "二维码生成失败" });
+    }
+    const loginId = randomId(16);
+    qrSessions.set(loginId, { authCode: j.data.auth_code, localId, createdAt: Date.now() });
+    const qr = await QRCode.toDataURL(j.data.url, {
+      width: 280,
+      margin: 2,
+      errorCorrectionLevel: "M",
+    });
+    res.json({ login_id: loginId, url: j.data.url, qr, expires_in: 180 });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "App 登录二维码获取失败" });
+  }
+});
+
+app.get("/api/app-login/poll", async (req, res) => {
+  const loginId = String(req.query.login_id || "");
+  const qr = qrSessions.get(loginId);
+  if (!qr) return res.status(400).json({ error: "登录二维码不存在或已过期" });
+  if (Date.now() - qr.createdAt > 180000) {
+    qrSessions.delete(loginId);
+    return res.json({ status: "expired", message: "二维码已过期" });
+  }
+  try {
+    const params = appSign({ auth_code: qr.authCode, local_id: qr.localId }, TV_APPKEY, TV_APPSEC);
+    const body = Object.keys(params).sort().map((k) => `${k}=${encAppValue(params[k])}`).join("&");
+    const r = await fetch("https://passport.bilibili.com/x/passport-tv-login/qrcode/poll", {
+      method: "POST",
+      headers: { ...COMMON_HEADERS, "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      signal: AbortSignal.timeout(10000),
+    });
+    const j = await r.json();
+    // TV 轮询状态码在根 code：0=成功 86038=失效 86039=尚未确认 86090=已扫码未确认
+    if (j.code !== 0) {
+      if (j.code === 86038) {
+        qrSessions.delete(loginId);
+        return res.json({ status: "expired", message: "二维码已过期" });
+      }
+      if (j.code === 86090) return res.json({ status: "scanned", message: "已扫码，请在手机上确认" });
+      return res.json({ status: "waiting", message: j.message || "等待登录" });
+    }
+    const d = j.data || {};
+    if (!d.access_token) {
+      qrSessions.delete(loginId);
+      return res.status(502).json({ status: "error", message: "登录成功但没有取得 access_token" });
+    }
+    qrSessions.delete(loginId);
+    res.json({
+      status: "success",
+      token: {
+        mid: d.mid,
+        access_token: d.access_token,
+        refresh_token: d.refresh_token,
+        expires_in: d.expires_in,
+      },
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ status: "error", message: "网络请求失败" });
+  }
+});
+
+// App 登录态验证：两步判定。
+// 1) oauth2/info（TV 版 appkey 签名）验证 token 真伪（假/过期 token 返回非 0，真 token 返回 code=0+账号信息）
+// 2) pgc/player/api/playurl 实测番剧有没有流（suee = 无流）
+// 注意：pgc playurl 对无效 token 也返回 suee（不报 -663），所以必须靠 oauth2/info 区分"token 无效"与"番剧无流"。
+app.get("/api/app-login/status", async (req, res) => {
+  const accessKey = String(req.get("X-Bili-Access-Key") || "").trim();
+  if (!accessKey) return res.json({ logged_in: false, message: "未提供 token" });
+  try {
+    // 1) token 真伪
+    let tokenOk = false;
+    let mid = 0, uname = "";
+    let oauthCode = null;
+    try {
+      const p1 = appSign({ access_token: accessKey }, TV_APPKEY, TV_APPSEC);
+      const q1 = Object.keys(p1).sort().map((k) => `${k}=${encAppValue(p1[k])}`).join("&");
+      const r1 = await fetch(`https://passport.bilibili.com/x/passport-login/oauth2/info?${q1}`, {
+        headers: { ...COMMON_HEADERS, "User-Agent": TV_UA },
+        signal: AbortSignal.timeout(10000),
+      });
+      const j1 = await r1.json();
+      oauthCode = j1.code;
+      if (j1.code === 0 && j1.data) {
+        tokenOk = true;
+        mid = j1.data.mid || 0;
+        uname = j1.data.uname || "";
+      }
+    } catch (e) { oauthCode = "net:" + e.message; }
+    if (!tokenOk) {
+      return res.json({ logged_in: false, code: oauthCode, message: `token 无效（oauth2 code=${oauthCode}）` });
+    }
+
+    // 2) 番剧流实测（默认《珈百璃的堕落》EP1）
+    const epId = parseInt(req.query.ep, 10) || 98615;
+    const params = appSign({
+      cid: "898312977",
+      ep_id: String(epId),
+      fnval: "16",
+      fnver: "0",
+      fourk: "1",
+      mobi_app: TV_MOBI_APP,
+      otype: "json",
+      platform: "android",
+      qn: "80",
+      access_key: accessKey,
+    }, TV_APPKEY, TV_APPSEC);
+    const qs = Object.keys(params).sort().map((k) => `${k}=${encAppValue(params[k])}`).join("&");
+    const pr = await fetch(`${TV_API_HOST}/pgc/player/api/playurl?${qs}`, {
+      headers: { ...COMMON_HEADERS, "User-Agent": TV_UA, Referer: "https://www.bilibili.com/" },
+      signal: AbortSignal.timeout(15000),
+    });
+    const pj = await pr.json();
+    console.log(`[app-status] oauth=${oauthCode} token=${String(accessKey).slice(0, 6)}... play_code=${pj.code} result=${pj.result?.result || (pj.result?.durl ? "has-durl" : (pj.result?.dash ? "has-dash" : "suee?"))}`);
+    if (pj.code !== 0) {
+      return res.json({ logged_in: true, appValid: true, playError: pj.code, message: `token 有效，但番剧接口报错（code=${pj.code}）` });
+    }
+    const d = pj.result || pj.data || {};
+    if (!d.durl?.length && !d.dash?.video?.length) {
+      return res.json({ logged_in: true, appValid: true, noStream: true, message: `token 有效（${uname || mid}），但该番 TV 端无流(suee)` });
+    }
+    return res.json({
+      logged_in: true,
+      appValid: true,
+      mid,
+      uname,
+      quality: d.quality,
+      accept_quality: d.accept_quality || [],
+      accept_description: d.accept_description || [],
+      message: `token 有效（${uname || mid}），番剧可播放`,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // 粉丝数/关注数：参考 WristBilibili 的 UP 主关系统计接口。
 async function fetchRelationStat(mid, session) {
   if (!mid) return { follower: null, following: null };
@@ -977,10 +1157,32 @@ async function resolveCid({ aid, bvid, page = 1 }, session = null) {
   const pages = data.pages || [];
   const target = pages[(parseInt(page, 10) || 1) - 1];
   if (!target) throw new Error("该视频不存在对应分P");
-  return { cid: target.cid, aid: data.aid, bvid: data.bvid };
+  // redirectUrl：番剧 bvid 时 view 接口会返回 bangumi/play/epXXXX，用于反查 ep_id 走 SSR 1080P
+  return { cid: target.cid, aid: data.aid, bvid: data.bvid, redirectUrl: data.redirect_url || "" };
 }
 
-async function fetchPlayUrl({ aid, bvid, cid, qn }, session = null, streamMode = "dash") {
+// 番剧 1080P 提取：抓番剧页 HTML，正则抠出 SSR 内联的 playurlSSRData（完整 playurl 响应，
+// 含 80 档 1080P 的三编码流 + 签名直链）。B 站服务端渲染时已带用户 cookies 取流，因此
+// 无大会员账号也能拿到 1080P（accept_quality 里 80 档只需登录）。
+async function fetchPgcPlayurlSSR(epId, session) {
+  const url = `https://www.bilibili.com/bangumi/play/ep${epId}`;
+  const res = await biliFetch(url, {
+    headers: {
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "zh-CN,zh;q=0.9",
+      Referer: "https://www.bilibili.com/",
+    },
+  }, session);
+  const html = await res.text();
+  const m = html.match(/const playurlSSRData = (\{[\s\S]*?\})\s*window\.__PLAYURL_HYDRATE_DATA__/);
+  if (!m) return null;
+  const j = JSON.parse(m[1]);
+  const vi = j.data?.result?.video_info;
+  if (!vi?.dash?.video?.length) return null;
+  return vi;
+}
+
+async function fetchPlayUrl({ aid, bvid, cid, qn, epId }, session = null, streamMode = "dash") {
   const buildBase = (pgc) => {
     const u = new URL(pgc
       ? "https://api.bilibili.com/pgc/player/web/playurl"
@@ -1049,6 +1251,56 @@ async function fetchPlayUrl({ aid, bvid, cid, qn }, session = null, streamMode =
     };
   }
 
+  // 番剧 1080P：B 站 SSR 在番剧页 HTML 里内联了 playurlSSRData（带用户 cookies 时服务端
+  // 给无大会员账号也下发 80 档 1080P）。抓 HTML 提取，比 pgc/player/web/playurl（只给 360P）高清。
+  // 仅 dash 模式走此路；durl 模式维持原逻辑（durl 只有 360P 兜底）。
+  if (epId && streamMode !== "durl") {
+    try {
+      const ssr = await fetchPgcPlayurlSSR(epId, session);
+      if (ssr) {
+        const wanted = qn ? ssr.dash.video.find((v) => Number(v.id) === Number(qn)) : null;
+        const video = wanted || ssr.dash.video.find((v) => Number(v.id) === 80) || ssr.dash.video[0];
+        const audio = ssr.dash.audio?.[0];
+        if (video && audio) {
+          console.log(`[pgc-ssr] ep=${epId} qn=${qn || 80} -> 1080P id=${video.id} h=${video.height} codecid=${video.codecid} codecs=${video.codecs}`);
+          // SSR 内联数据只有 dash 没有 durl：dash 播放失败时要能降级，
+          // 顺手用 pgc/player/web/playurl(fnval=0) 拿一条 360P mp4 直链做兜底。
+          let durlFallback = "";
+          try {
+            const du = new URL("https://api.bilibili.com/pgc/player/web/playurl");
+            du.searchParams.set("avid", String(aid || ""));
+            du.searchParams.set("bvid", bvid || "");
+            du.searchParams.set("cid", String(cid));
+            du.searchParams.set("qn", "16");
+            du.searchParams.set("fnval", "0");
+            du.searchParams.set("otype", "json");
+            du.searchParams.set("platform", "html5");
+            du.searchParams.set("high_quality", "1");
+            const dj = await biliFetch(du.toString(), {
+              headers: { Referer: "https://www.bilibili.com/bangumi/play/" },
+            }, session).then((r) => r.json()).catch(() => null);
+            durlFallback = dj?.result?.durl?.[0]?.url || "";
+          } catch {}
+          return {
+            quality: video.id,
+            accept_quality: ssr.accept_quality,
+            accept_description: ssr.accept_description,
+            dash: {
+              video: video.base_url || video.baseUrl,
+              audio: audio.base_url || audio.baseUrl,
+              videoId: video.id,
+              audioId: audio.id,
+            },
+            fallbackUrl: durlFallback,
+            isPgc: true,
+          };
+        }
+      }
+    } catch (e) {
+      console.log(`[pgc-ssr] ep=${epId} 提取失败，降级 pgc/player/web/playurl:`, e.message);
+    }
+  }
+
   let result = await tryOne(false);
   let isPgc = false;
   if (!result) {
@@ -1068,16 +1320,132 @@ app.get("/api/play", async (req, res) => {
   const page = parseInt(req.query.p, 10) || 1;
   const qn = parseInt(req.query.qn, 10) || 0;
   const stream = String(req.query.stream || "").trim() === "durl" ? "durl" : "dash";
+  const epId = parseInt(req.query.ep, 10) || 0; // 番剧分集 ep_id（前端番剧时传，用于 SSR 1080P 提取）
   if (!bvid && !aid) return res.status(400).json({ code: 1, message: "缺少 bv 或 av 参数" });
 
   try {
     const session = getSession(req);
     const resolved = await resolveCid({ aid, bvid, page }, session);
-    const play = await fetchPlayUrl({ ...resolved, qn }, session, stream);
-    res.json({ code: 0, ...resolved, page, ...play });
+    // 收藏夹/历史记录等入口只带 bv 不带 ep：若 bvid 是番剧，view 接口会给 redirect_url
+    // （bangumi/play/epXXXX），反查出 ep_id 后同样走 SSR 1080P 提取，让所有番剧入口的画质统一受设置控制。
+    let useEp = epId;
+    if (!useEp && resolved.redirectUrl) {
+      const epm = String(resolved.redirectUrl).match(/ep(\d+)/);
+      if (epm) useEp = epm[1];
+    }
+    const play = await fetchPlayUrl({ ...resolved, qn, epId: useEp }, session, stream);
+    const { redirectUrl: _ru, ...rest } = resolved;
+    res.json({ code: 0, ...rest, page, ...play });
   } catch (e) {
     console.error(e);
     res.status(502).json({ code: 1, message: e.message || "解析失败" });
+  }
+});
+
+// ---------------- 番剧播放（App 接口，需 App 扫码登录） ----------------
+// 前端在番剧且有 bili_app_tokens 时调此接口（X-Bili-Access-Key 头带 access_token），
+// 服务端用 TV 版 appkey 签名请求 pgc/player/api/playurl，绕过网页端的高清风控。
+// 返回结构与 /api/play 对齐（dash / fallbackUrl / quality / accept_* / isPgc）。
+app.get("/api/play/app", async (req, res) => {
+  const accessKey = String(req.get("X-Bili-Access-Key") || "").trim();
+  if (!accessKey) return res.status(400).json({ code: 1, message: "缺少 App 登录凭证（X-Bili-Access-Key）" });
+  const epId = parseInt(req.query.ep, 10);
+  const bvid = String(req.query.bv || "").trim();
+  const aid = parseInt(req.query.av || "", 10) || 0;
+  const qn = parseInt(req.query.qn, 10) || 80;
+  const stream = String(req.query.stream || "").trim() === "durl" ? "durl" : "dash";
+  if (!epId) return res.status(400).json({ code: 1, message: "缺少 ep 参数" });
+
+  try {
+    const session = getSession(req);
+
+    // 1. season 接口拿当前分集的 cid（弹幕用），拿不到也不阻塞播放
+    let cid = 0;
+    try {
+      const r = await biliFetch(`https://api.bilibili.com/pgc/view/web/season?ep_id=${epId}`, {}, session);
+      const j = await r.json();
+      const eps = (j.result?.episodes) || [];
+      const cur = eps.find((e) => e.id === epId) || eps[0] || {};
+      cid = cur.cid || 0;
+    } catch {}
+
+    // 2. App 番剧播放接口（TV 版 appkey 签名 + access_key，走 TV 专属域 api.snm0516.aisee.tv）
+    const params = appSign({
+      cid: String(cid || 0),
+      ep_id: String(epId),
+      fnval: stream === "durl" ? "0" : "16",
+      fnver: "0",
+      fourk: "1",
+      mobi_app: TV_MOBI_APP,
+      otype: "json",
+      platform: "android",
+      qn: String(qn),
+      access_key: accessKey,
+    }, TV_APPKEY, TV_APPSEC);
+    const qs = Object.keys(params).sort().map((k) => `${k}=${encAppValue(params[k])}`).join("&");
+    const pr = await fetch(`${TV_API_HOST}/pgc/player/api/playurl?${qs}`, {
+      headers: { ...COMMON_HEADERS, "User-Agent": TV_UA, Referer: "https://www.bilibili.com/" },
+      signal: AbortSignal.timeout(15000),
+    });
+    const pj = await pr.json();
+    // 诊断日志：看到 B 站对这个 token 到底返回了什么（code/quality/dash/durl）
+    {
+      const d0 = pj.result || pj.data || {};
+      console.log(`[app-play] ep=${epId} qn=${qn} token=${String(accessKey).slice(0, 6)}... code=${pj.code} msg=${pj.message} quality=${d0.quality} accept=[${(d0.accept_quality || []).join(",")}] dash_v=[${(d0.dash?.video || []).map((v) => v.id).join(",")}] durl=${(d0.durl || []).length}`);
+      console.log(`[app-play-raw] ${JSON.stringify(pj).slice(0, 600)}`);
+    }
+    if (pj.code !== 0) {
+      return res.status(502).json({ code: pj.code, message: pj.message || "App 播放接口失败" });
+    }
+    const d = pj.result || pj.data || {};
+
+    // 3. 对齐 /api/play 的同构输出
+    let dash = null;
+    let fallbackUrl = "";
+    if (d.dash?.video?.length) {
+      const wanted = qn ? d.dash.video.find((v) => Number(v.id) === Number(qn)) : null;
+      const video = wanted || d.dash.video[0];
+      const audio = d.dash.audio?.[0];
+      dash = {
+        video: video.baseUrl || video.base_url,
+        audio: audio ? (audio.baseUrl || audio.base_url) : null,
+        videoId: video.id,
+        audioId: audio ? audio.id : null,
+      };
+    } else if (d.durl?.length) {
+      fallbackUrl = d.durl[0].url;
+    }
+    if (!dash && !fallbackUrl) {
+      return res.status(502).json({ code: 1, message: "未获取到可播放的直链" });
+    }
+
+    res.json({
+      code: 0,
+      cid: cid || 0,
+      aid: aid || 0,
+      bvid,
+      quality: dash ? dash.videoId : d.quality,
+      accept_quality: d.accept_quality || [],
+      accept_description: d.accept_description || [],
+      dash,
+      fallbackUrl,
+      isPgc: true,
+      via: "app",
+      ...(req.query.debug === "1" ? {
+        debug: {
+          raw_quality: d.quality,
+          raw_accept_quality: d.accept_quality || [],
+          raw_accept_desc: d.accept_description || [],
+          raw_dash_video_ids: (d.dash?.video || []).map((v) => v.id),
+          raw_durl_count: (d.durl || []).length,
+          raw_message: pj.message || "",
+          token_prefix: String(accessKey).slice(0, 8) + "...",
+        },
+      } : {}),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(502).json({ code: 1, message: e.message || "App 播放解析失败" });
   }
 });
 
