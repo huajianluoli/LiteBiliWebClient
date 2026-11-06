@@ -1,4 +1,42 @@
+# 依赖
 node_modules/
+
+# 运行时数据：B站 cookie、ASR 歌词缓存、服务端日志
 data/
-.env
+data/asr/
 *.log
+
+# 环境变量
+.env
+.env.*
+
+# 本地 ASR 结果的其它可能位置（不要上传歌词/识别结果）
+asr-cache/
+*.asr.json
+
+# 本机测试 / 调试脚本与截图
+_*.ps1
+_*.cmd
+_*.bat
+_*.vbs
+_*.png
+_*.jpg
+_*.jpeg
+_*.raw
+
+# 本机开机自启 / 守护脚本（不属于项目代码）
+start_*.ps1
+start_*.cmd
+start_*.bat
+start_*.vbs
+start_*.py
+start_dsh*
+watch_*.ps1
+watch_*.vbs
+watch_*.py
+watchdog*
+*_hidden.*
+
+# 临时文件
+*.tmp
+新建文本文档.txt

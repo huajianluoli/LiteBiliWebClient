@@ -6,9 +6,11 @@ const path = require("path");
 const crypto = require("crypto");
 const fs = require("fs");
 const { Readable } = require("stream");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json({ limit: "1mb" }));
@@ -464,6 +466,29 @@ function sanitizeTitle(raw) {
     .replace(/<[^>]+>/g, "")
     .replace(/@@EM_OPEN@@/g, '<em class="keyword">')
     .replace(/@@EM_CLOSE@@/g, "</em>");
+}
+
+// 从专栏页 HTML 里取出 __INITIAL_STATE__（新版专栏实际是 opus 详情结构）
+function extractReadInitialState(html) {
+  const m = String(html || "").match(/(?:window\.)?__INITIAL_STATE__\s*=\s*/);
+  if (!m) return null;
+  const start = m.index + m[0].length;
+  let depth = 0, inStr = false, esc = false, end = -1;
+  for (let i = start; i < html.length; i++) {
+    const c = html[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+    } else if (c === '"') inStr = true;
+    else if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) { end = i + 1; break; }
+    }
+  }
+  if (end < 0) return null;
+  try { return JSON.parse(html.slice(start, end)); } catch { return null; }
 }
 
 function normalizeVideo(item) {
@@ -967,6 +992,122 @@ app.get("/api/search/anime", async (req, res) => {
   } catch (e) {
     res.json({ list: [] });
   }
+});
+
+// 图文（专栏）搜索：search_type=article，需 WBI 签名；返回卡片需要的字段
+app.get("/api/search/articles", async (req, res) => {
+  const keyword = String(req.query.keyword || "").trim();
+  const page = parseInt(req.query.page, 10) || 1;
+  if (!keyword) return res.status(400).json({ error: "缺少 keyword 参数" });
+
+  try {
+    const session = getSession(req);
+    const cookie = await ensureCookie();
+    const signed = await signWbi({
+      keyword,
+      search_type: "article",
+      page: String(page),
+    }, session);
+    const qs = new URLSearchParams(signed).toString();
+    const r = await biliFetch(`https://api.bilibili.com/x/web-interface/search/type?${qs}`, {
+      headers: { Cookie: cookie, Referer: `https://search.bilibili.com/article?keyword=${encodeURIComponent(keyword)}` },
+    }, session);
+    const data = await r.json();
+    if (data.code !== 0) return res.status(502).json({ error: `B站接口返回错误: ${data.message || data.code}` });
+
+    const list = (data.data?.result || []).map((a) => {
+      const imgs = Array.isArray(a.image_urls) ? a.image_urls : [];
+      let cover = imgs[0] || a.banner_url || "";
+      if (cover.startsWith("//")) cover = `https:${cover}`;
+      return {
+        id: a.id ?? null,
+        title: sanitizeTitle(a.title || ""),
+        author: a.author || "",
+        mid: a.mid ?? null,
+        cover,
+        view: a.view ?? null,
+        like: a.like ?? null,
+        reply: a.reply ?? null,
+        pubdate: a.pubdate || a.pub_time || 0,
+        category: a.category_name || "",
+      };
+    }).filter((a) => a.id);
+
+    res.json({
+      total: data.data?.numResults || 0,
+      totalPages: data.data?.numPages || 1,
+      page,
+      list,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "代理请求失败，请稍后重试" });
+  }
+});
+
+// 专栏 cvid -> 动态 id。
+// 图文搜索返回的是专栏 cvid（read/cv{id}），而站内 opus 页用的是动态 id；
+// x/article/view 的 dyn_id_str 就是它，之后前端继续走 /api/opus 渲染。
+// 上游对 article/view 限频较严，这里做 6 小时内存缓存，失败再退回专栏页 SSR 解析。
+const articleIdCache = new Map(); // cvid -> { opusId, at }
+const ARTICLE_ID_TTL = 6 * 3600 * 1000;
+
+app.get("/api/article", async (req, res) => {
+  const id = String(req.query.id || "").trim();
+  if (!/^\d{1,20}$/.test(id)) return res.status(400).json({ error: "缺少或无效的图文 id" });
+  const url = `https://www.bilibili.com/read/cv${id}`;
+
+  const hit = articleIdCache.get(id);
+  if (hit && Date.now() - hit.at < ARTICLE_ID_TTL) {
+    return res.json({ opusId: hit.opusId, url });
+  }
+
+  // 首选接口：article/view 直接给出 dyn_id_str（即 opus 详情接口要的 id）
+  try {
+    const session = getSession(req);
+    const cookie = await ensureCookie();
+    const r = await biliFetch(`https://api.bilibili.com/x/article/view?id=${id}`, {
+      headers: { Cookie: cookie, Referer: url },
+    }, session);
+    const j = await r.json();
+    const opusId = String(j.data?.dyn_id_str || j.data?.opus?.opus_id || "");
+    if (j.code === 0 && /^\d{1,20}$/.test(opusId)) {
+      articleIdCache.set(id, { opusId, at: Date.now() });
+      return res.json({ opusId, url });
+    }
+  } catch (e) { /* 交给下面的 SSR 兜底 */ }
+
+  // 兜底：专栏页 SSR 时会被重定向到 /opus/{id}，或页面里带 __INITIAL_STATE__.id。
+  // 上游按请求概率返回 SPA 壳（约一半），所以重试几次；必须完全匿名请求
+  // （带 Cookie 一定返回没有 __INITIAL_STATE__ 的 SPA 壳）。
+  const readHeaders = {
+    ...COMMON_HEADERS,
+    Referer: "https://search.bilibili.com/all",
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9",
+  };
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const r = await fetch(`${url}?from=search`, {
+        headers: readHeaders,
+        redirect: "follow",
+        signal: AbortSignal.timeout(15000),
+      });
+      if (r.status === 412) break; // 已被上游限流，继续重试只会更糟
+      let opusId = (String(r.url || "").match(/\/opus\/(\d+)/) || [])[1] || "";
+      if (!opusId) {
+        const state = extractReadInitialState(await r.text());
+        opusId = String(state?.id || state?.detail?.id_str || "");
+      }
+      if (/^\d{1,20}$/.test(opusId)) {
+        articleIdCache.set(id, { opusId, at: Date.now() });
+        return res.json({ opusId, url });
+      }
+    } catch (e) { /* 继续重试 */ }
+    if (attempt < 3) await new Promise((r) => setTimeout(r, 400));
+  }
+
+  res.status(502).json({ error: "专栏解析失败，可能已被删除或上游限流" });
 });
 
 // ep_id 转 bvid（番剧播放用），同时返回全部分集
@@ -1482,6 +1623,465 @@ app.get("/api/info", async (req, res) => {
     });
   } catch (e) {
     res.status(502).json({ code: 1, message: e.message || "获取视频信息失败" });
+  }
+});
+
+// ----------------------------- 视频字幕（听视频歌词） -----------------------------
+// 字幕列表来自 x/player/v2；实测匿名请求 subtitles 恒为空，必须带登录 Cookie。
+// 轨道排序：UP 上传（type=0）优先于 AI（type=1），同类里中文优先。
+const subtitleTrackCache = new Map(); // "aid|bvid:cid" -> { tracks, at }
+const subtitleCueCache = new Map();   // "cid:lan" -> { data, at }
+const SUBTITLE_TRACK_TTL = 2 * 60 * 1000;
+const SUBTITLE_CUE_TTL = 10 * 60 * 1000;
+
+function subtitleTrackRank(t) {
+  const lan = String(t.lan || "").toLowerCase();
+  const isAi = Number(t.type) === 1;
+  if (isAi) {
+    // ai_type=0 是“原声/源语言”，ai_type=1 是翻译。
+    // 英文歌的 ai-zh 是翻译，可能完全不对；必须优先 ai-en（源语言）。
+    if (Number(t.aiType) === 0) return 100;
+    return lan === "ai-zh" ? 120 : 130;
+  }
+  // UP 主字幕：中文优先，其余语言排后面
+  if (lan === "zh" || lan === "zh-hans" || lan === "zh-cn" || lan === "zh-hant" || lan.startsWith("zh-")) return 0;
+  return 20;
+}
+
+function normalizeSubtitleTracks(subs) {
+  return (Array.isArray(subs) ? subs : [])
+    .map((s) => ({
+      id: String(s.id_str || s.id || ""),
+      lan: String(s.lan || ""),
+      lanDoc: String(s.lan_doc || s.lan || ""),
+      type: Number(s.type) || 0,
+      aiType: Number(s.ai_type) || 0,
+      aiStatus: Number(s.ai_status) || 0,
+      url: String(s.subtitle_url || ""),
+    }))
+    .filter((t) => t.url && t.lan)
+    .sort((a, b) => subtitleTrackRank(a) - subtitleTrackRank(b));
+}
+
+// bili_ticket 不是必需，但官方文档说“存在可降低风控概率”。
+// 这里按账号懒生成并缓存，失败就静默跳过，不影响字幕主流程。
+const biliTicketCache = new Map(); // uid/csrf -> { ticket, at }
+const biliTicketFailCache = new Map(); // uid/csrf -> 失败时间，10 分钟内不重复尝试
+async function ensureBiliTicket(session, force) {
+  const csrf = String(session?.cookies?.bili_jct || "");
+  if (!session?.cookies?.SESSDATA) return "";
+  const key = String(session.cookies.DedeUserID || csrf || "anon");
+  const hit = biliTicketCache.get(key);
+  if (!force && hit && Date.now() - hit.at < 2.5 * 24 * 3600 * 1000) return hit.ticket;
+  const failAt = biliTicketFailCache.get(key) || 0;
+  if (!force && Date.now() - failAt < 10 * 60 * 1000) return "";
+
+  try {
+    const ts = Math.floor(Date.now() / 1000);
+    const hexsign = crypto.createHmac("sha256", "XgwSnGZ1p").update(`ts${ts}`).digest("hex");
+    const body = new URLSearchParams({
+      key_id: "ec02",
+      hexsign,
+      "context[ts]": String(ts),
+      csrf,
+    });
+    const r = await fetch("https://api.bilibili.com/bapis/bilibili.api.ticket.v1.Ticket/GenWebTicket", {
+      method: "POST",
+      headers: {
+        ...COMMON_HEADERS,
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader(session.cookies),
+      },
+      body: body.toString(),
+      signal: AbortSignal.timeout(12000),
+    });
+    const j = await r.json();
+    const ticket = String(j?.data?.ticket || "");
+    if (j.code === 0 && ticket) {
+      biliTicketCache.set(key, { ticket, at: Date.now() });
+      return ticket;
+    }
+  } catch (e) { /* 可选增强，失败不阻塞 */ }
+  biliTicketFailCache.set(key, Date.now());
+  return "";
+}
+
+// 字幕请求优先用前端带回来的“原始浏览器 cookie”，不要一上来就换成服务端合成的设备指纹。
+// 网页端登录态和 buvid3/_uuid 是配套的，换指纹反而更容易被风控判成异常环境。
+// 原始 cookie 不被上游认（login_mid=0 / 风控码）时，再回退到 biliFetch 的账号设备链路。
+async function fetchPlayerV2Json(url, session, bvid) {
+  const rawCookie = cookieHeader(session.cookies);
+  if (rawCookie) {
+    try {
+      const r = await fetch(url, {
+        headers: {
+          ...COMMON_HEADERS,
+          Cookie: rawCookie,
+          Referer: bvid ? `https://www.bilibili.com/video/${bvid}` : COMMON_HEADERS.Referer,
+          "Accept-Language": "zh-CN,zh;q=0.9",
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+      const j = await r.json();
+      const tracks = j.data?.subtitle?.subtitles || [];
+      if (j.code === 0 && (Number(j.data?.login_mid) > 0 || tracks.length)) return j;
+      if (j.code !== 0 && ![-352, -412, -509].includes(j.code)) return j;
+    } catch (e) { /* 回退到账号设备链路 */ }
+  }
+  return await (await biliFetch(url, {}, session)).json();
+}
+
+async function fetchSubtitleData({ aid, bvid, cid }, session, opts = {}) {
+  if (!session || !cid) return { tracks: [], loginMid: 0, needLogin: false };
+  const key = `${aid || bvid || ""}:${cid}`;
+  const hit = opts.noCache ? null : subtitleTrackCache.get(key);
+  if (hit && Date.now() - hit.at < SUBTITLE_TRACK_TTL) return hit;
+
+  const u = new URL("https://api.bilibili.com/x/player/v2");
+  if (aid) u.searchParams.set("aid", String(aid));
+  else u.searchParams.set("bvid", String(bvid || ""));
+  u.searchParams.set("cid", String(cid));
+  const ticket = await ensureBiliTicket(session).catch(() => "");
+  if (ticket) session.cookies.bili_ticket = ticket;
+  let j = await fetchPlayerV2Json(u.toString(), session, bvid);
+
+  // -352 / -412 / -509 都是风控/限流。只做一次退避重试：重新取 bili_ticket 再请求，
+  // 频繁重试反而会加深惩罚。
+  if (j.code === -101 || j.code === -111) {
+    const err = new Error("登录态已失效，请重新登录");
+    err.loginRequired = true;
+    throw err;
+  }
+  if ([-352, -412, -509].includes(j.code)) {
+    await new Promise((r) => setTimeout(r, 1000 + Math.floor(Math.random() * 800)));
+    const fresh = await ensureBiliTicket(session, true).catch(() => "");
+    if (fresh) session.cookies.bili_ticket = fresh;
+    j = await fetchPlayerV2Json(u.toString(), session, bvid);
+    // 老接口仍 412 时再试一次 WBI 签名版
+    if (j.code === -412) {
+      try {
+        const signed = await signWbi({ aid: String(aid || ""), bvid: bvid || "", cid: String(cid) }, session);
+        const wbiUrl = `https://api.bilibili.com/x/player/wbi/v2?${new URLSearchParams(signed).toString()}`;
+        j = await fetchPlayerV2Json(wbiUrl, session, bvid);
+      } catch (e) { /* 保留原始错误 */ }
+    }
+  }
+  if (j.code !== 0) {
+    const err = new Error(`${j.message || "获取字幕列表失败"}（code=${j.code}）`);
+    err.code = j.code;
+    throw err;
+  }
+  const loginMid = Number(j.data?.login_mid) || 0;
+  const needLogin = !!j.data?.need_login_subtitle;
+  let tracks = normalizeSubtitleTracks(j.data?.subtitle?.subtitles);
+
+  // B 站 AI 字幕列表会“分次返回”：同一次请求可能只给中文翻译，下一次才给英文原声。
+  // 只有翻译/空列表时再补拉 1–2 次并按轨道 id 合并，优先拿到 ai_type=0 的原声轨。
+  const hasUpTrack = () => tracks.some((t) => Number(t.type) === 0);
+  const hasSourceAi = () => tracks.some((t) => Number(t.type) === 1 && Number(t.aiType) === 0);
+  for (let attempt = 0; attempt < 2 && loginMid > 0 && !hasUpTrack() && !hasSourceAi(); attempt++) {
+    await new Promise((r) => setTimeout(r, 650 + attempt * 600 + Math.floor(Math.random() * 300)));
+    try {
+      const jj = await fetchPlayerV2Json(u.toString(), session, bvid);
+      if (jj.code !== 0) continue;
+      const more = normalizeSubtitleTracks(jj.data?.subtitle?.subtitles);
+      if (!more.length) continue;
+      const merged = new Map();
+      for (const t of [...tracks, ...more]) merged.set(`${t.lan}:${t.type}:${t.aiType}:${t.id}`, t);
+      tracks = [...merged.values()].sort((a, b) => subtitleTrackRank(a) - subtitleTrackRank(b));
+    } catch (e) { /* 补拉失败就用手上有的 */ }
+  }
+
+  const data = {
+    tracks,
+    // 关键：会话里 SESSDATA 还在，并不代表 B 站认这个登录态。
+    // player/v2 的 login_mid 为 0 说明上游实际是匿名请求，此时字幕列表一定为空。
+    loginMid,
+    needLogin,
+  };
+  // 登录失效不缓存，用户重新登录后应立刻生效
+  if (data.loginMid > 0) {
+    if (subtitleTrackCache.size > 200) subtitleTrackCache.clear();
+    subtitleTrackCache.set(key, { ...data, at: Date.now() });
+  }
+  try {
+    const brief = data.tracks.map((t) => {
+      const u = new URL(t.url.startsWith("//") ? `https:${t.url}` : t.url);
+      return `${t.lan}:${u.pathname}`;
+    }).join(",");
+    console.log(`[subtitle-tracks] aid=${aid || ""} bvid=${bvid || ""} cid=${cid} login=${data.loginMid} tracks=${data.tracks.length} [${brief}]`);
+  } catch (e) {}
+  return data;
+}
+
+async function fetchSubtitleTracks({ aid, bvid, cid }, session) {
+  return (await fetchSubtitleData({ aid, bvid, cid }, session)).tracks;
+}
+
+// 字幕轨道列表（多语言切换用）
+app.get("/api/subtitles", async (req, res) => {
+  const aid = parseInt(req.query.aid || req.query.av || "", 10) || 0;
+  const bvid = String(req.query.bvid || req.query.bv || "").trim();
+  const cid = parseInt(req.query.cid || "", 10) || 0;
+  if (!cid) return res.status(400).json({ error: "缺少 cid 参数" });
+
+  const session = getSession(req);
+  if (!session) return res.json({ tracks: [], loginRequired: true });
+  try {
+    const data = await fetchSubtitleData({ aid, bvid, cid }, session);
+    // 不把带 auth_key 的临时下载地址交给前端，切换语言时再让服务端解析一次
+    res.json({
+      tracks: data.tracks.map(({ lan, lanDoc, type, aiType }) => ({ lan, lanDoc, type, aiType })),
+      loginRequired: data.loginMid === 0,
+      loginInvalid: data.loginMid === 0,
+      needLogin: data.needLogin,
+    });
+  } catch (e) {
+    if (e.loginRequired) return res.status(401).json({ error: e.message, loginRequired: true });
+    console.error(`[subtitle] cid=${cid} 列表失败:`, e.message);
+    res.status(502).json({ error: e.message || "获取字幕列表失败" });
+  }
+});
+
+async function downloadSubtitlePayload(track, bvid) {
+  let u;
+  const raw = track.url.startsWith("//") ? `https:${track.url}` : track.url.replace(/^http:/i, "https:");
+  try { u = new URL(raw); }
+  catch { throw new Error("字幕地址无效"); }
+  if (u.protocol !== "https:" || !/(^|\.)hdslb\.com$/i.test(u.hostname)) {
+    throw new Error("字幕地址不在允许的域名内");
+  }
+  const r = await fetch(u.toString(), {
+    headers: { ...COMMON_HEADERS, Referer: bvid ? `https://www.bilibili.com/video/${bvid}` : "https://www.bilibili.com/" },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!r.ok) throw new Error(`字幕下载失败（HTTP ${r.status}）`);
+  const text = await r.text();
+  try {
+    const fin = new URL(r.url);
+    console.log(`[subtitle-download] ${u.origin}${u.pathname} -> ${fin.origin}${fin.pathname} status=${r.status} type=${r.headers.get("content-type")} len=${text.length}`);
+  } catch (e) {}
+  let j;
+  try { j = JSON.parse(text.replace(/^\uFEFF/, "")); }
+  catch { throw new Error("字幕内容不是有效 JSON"); }
+  const list = (Array.isArray(j.body) ? j.body : [])
+    .map((x) => ({
+      from: Number(x.from) || 0,
+      to: Number(x.to) || 0,
+      text: String(x.content == null ? "" : x.content).trim(),
+    }))
+    .filter((x) => x.text);
+  return { lan: track.lan, lanDoc: track.lanDoc, type: track.type, list };
+}
+
+// 单个字幕轨道的正文（服务端代理下载，避免前端跨域和 auth_key 暴露）
+app.get("/api/subtitle", async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) return;
+  const aid = parseInt(req.query.aid || req.query.av || "", 10) || 0;
+  const bvid = String(req.query.bvid || req.query.bv || "").trim();
+  const cid = parseInt(req.query.cid || "", 10) || 0;
+  const wantLan = String(req.query.lan || "").trim();
+  if (!cid) return res.status(400).json({ error: "缺少 cid 参数" });
+
+  try {
+    let data = await fetchSubtitleData({ aid, bvid, cid }, session);
+    if (data.loginMid === 0) {
+      return res.status(401).json({ error: "登录态已失效，请重新登录后加载字幕", loginRequired: true });
+    }
+    if (!data.tracks.length) {
+      // 空轨道有时是上游风控降级，强制刷新一次再判断
+      data = await fetchSubtitleData({ aid, bvid, cid }, session, { noCache: true });
+      if (data.loginMid === 0) {
+        return res.status(401).json({ error: "登录态已失效，请重新登录后加载字幕", loginRequired: true });
+      }
+    }
+    let tracks = data.tracks;
+    if (!tracks.length) return res.status(404).json({ error: "该视频没有可用字幕" });
+
+    const ordered = (wantLan
+      ? [...tracks.filter((t) => t.lan === wantLan), ...tracks.filter((t) => t.lan !== wantLan)]
+      : tracks
+    ).slice(0, 8);
+
+    const cacheKeyOf = (t) => `${cid}:${t.lan}:${t.type || 0}:${t.id || ""}`;
+    let payload = null;
+    let usedTrack = null;
+    const errors = [];
+
+    for (const t of ordered) {
+      const hit = subtitleCueCache.get(cacheKeyOf(t));
+      if (hit && Date.now() - hit.at < SUBTITLE_CUE_TTL) {
+        payload = hit.data;
+        usedTrack = t;
+        break;
+      }
+      try {
+        payload = await downloadSubtitlePayload(t, bvid);
+        usedTrack = t;
+        break;
+      } catch (err) {
+        errors.push(`${t.lan}:${err.message}`);
+      }
+    }
+
+    // 所有 URL 都失败时，强制刷新一次轨道列表（auth_key 可能过期）
+    if (!payload) {
+      data = await fetchSubtitleData({ aid, bvid, cid }, session, { noCache: true });
+      tracks = data.tracks;
+      const retry = (wantLan
+        ? [...tracks.filter((t) => t.lan === wantLan), ...tracks.filter((t) => t.lan !== wantLan)]
+        : tracks
+      ).slice(0, 8);
+      for (const t of retry) {
+        try {
+          payload = await downloadSubtitlePayload(t, bvid);
+          usedTrack = t;
+          break;
+        } catch (err) {
+          errors.push(`${t.lan}:${err.message}`);
+        }
+      }
+    }
+
+    if (!payload) {
+      console.error(`[subtitle] cid=${cid} 全部轨道下载失败:`, errors.join(" | "));
+      return res.status(502).json({ error: `字幕加载失败：${errors[0] || "上游无响应"}` });
+    }
+
+    if (subtitleCueCache.size > 200) subtitleCueCache.clear();
+    if (usedTrack) subtitleCueCache.set(cacheKeyOf(usedTrack), { data: payload, at: Date.now() });
+    res.json(payload);
+  } catch (e) {
+    if (e.loginRequired) return res.status(401).json({ error: e.message, loginRequired: true });
+    console.error(`[subtitle] cid=${cid} 加载失败:`, e.message);
+    res.status(502).json({ error: e.message || "字幕加载失败" });
+  }
+});
+
+// ----------------------------- 本地 ASR 兜底（B站 AI 字幕内容错乱时） -----------------------------
+// 复用 servers/.asr 里的 faster-whisper + small 模型。只按 cid 缓存结果，首次生成较慢。
+const execFileAsync = promisify(execFile);
+const ASR_ROOT = path.join(__dirname, "..", ".asr");
+const ASR_SCRIPT = path.join(__dirname, "scripts", "asr_transcribe.py");
+const ASR_CACHE_DIR = path.join(DATA_DIR, "asr");
+const ASR_MODELS = {
+  fast: process.env.ASR_MODEL_FAST || "E:\\ASR-Models\\faster-whisper-base",
+  accurate: process.env.ASR_MODEL_ACCURATE || "E:\\ASR-Models\\faster-whisper-large-v3-turbo",
+};
+const ASR_FALLBACK_MODEL = path.join(ASR_ROOT, "models", "small");
+const asrJobs = new Map();
+let asrBusy = false;
+
+function resolveAsrModel(quality) {
+  const preferred = ASR_MODELS[quality] || ASR_MODELS.fast;
+  if (fs.existsSync(path.join(preferred, "model.bin"))) return preferred;
+  if (fs.existsSync(path.join(ASR_FALLBACK_MODEL, "model.bin"))) return ASR_FALLBACK_MODEL;
+  return "";
+}
+
+async function runAsrJob({ bvid, aid, cid, req, quality }) {
+  if (!fs.existsSync(ASR_SCRIPT)) throw new Error("缺少 scripts/asr_transcribe.py");
+  const modelPath = resolveAsrModel(quality);
+  if (!modelPath) throw new Error("缺少 ASR 模型");
+  fs.mkdirSync(ASR_CACHE_DIR, { recursive: true });
+
+  const qs = new URLSearchParams({ cid: String(cid), stream: "dash" });
+  if (bvid) qs.set("bvid", bvid);
+  if (aid) qs.set("aid", String(aid));
+  const fwd = {};
+  for (const h of ["x-bili-cookie", "x-device-id", "x-access-token"]) {
+    if (req.headers[h]) fwd[h] = req.headers[h];
+  }
+  const ar = await fetch(`http://127.0.0.1:${PORT}/api/audio?${qs.toString()}`, {
+    headers: fwd,
+    signal: AbortSignal.timeout(40000),
+  });
+  const aj = await ar.json().catch(() => ({}));
+  if (!ar.ok || !aj.audioUrl) throw new Error(aj.message || "获取音频直链失败");
+
+  const audioFile = path.join(ASR_CACHE_DIR, `${cid}.m4a`);
+  const r = await fetch(aj.audioUrl, {
+    headers: { ...COMMON_HEADERS, Referer: "https://www.bilibili.com/" },
+    signal: AbortSignal.timeout(180000),
+  });
+  if (!r.ok) throw new Error(`音频下载失败（HTTP ${r.status}）`);
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (!buf.length) throw new Error("音频内容为空");
+  fs.writeFileSync(audioFile, buf);
+
+  try {
+    const python = process.env.PYTHON || "python";
+    const { stdout } = await execFileAsync(python, [ASR_SCRIPT, audioFile, "--model", modelPath], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(ASR_ROOT, "lib"),
+        PYTHONIOENCODING: "utf-8",
+      },
+      timeout: 45 * 60 * 1000,
+      maxBuffer: 50 * 1024 * 1024,
+      windowsHide: true,
+    });
+    const text = String(stdout || "").trim();
+    const start = text.indexOf("{");
+    if (start < 0) throw new Error("ASR 没有返回 JSON");
+    const data = JSON.parse(text.slice(start));
+    if (!Array.isArray(data.list) || !data.list.length) throw new Error("ASR 没有识别出文字");
+    data.quality = quality;
+    data.model = modelPath;
+    fs.writeFileSync(path.join(ASR_CACHE_DIR, `${cid}.${quality}.json`), JSON.stringify(data));
+    return data;
+  } finally {
+    try { fs.unlinkSync(audioFile); } catch (e) {}
+  }
+}
+
+app.get("/api/subtitle/asr", async (req, res) => {
+  const bvid = String(req.query.bvid || req.query.bv || "").trim();
+  const aid = parseInt(req.query.aid || req.query.av || "", 10) || 0;
+  const cid = parseInt(req.query.cid || "", 10) || 0;
+  const quality = req.query.quality === "accurate" ? "accurate" : "fast";
+  if (!cid) return res.status(400).json({ error: "缺少 cid 参数" });
+
+  const cacheFile = path.join(ASR_CACHE_DIR, `${cid}.${quality}.json`);
+  try {
+    if (fs.existsSync(cacheFile)) {
+      const data = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+      return res.json({ ...data, cached: true, source: "asr" });
+    }
+    // 旧版只有 <cid>.json（small 模型），当作 fast 缓存继续用，避免重复跑
+    const legacy = path.join(ASR_CACHE_DIR, `${cid}.json`);
+    if (quality === "fast" && fs.existsSync(legacy)) {
+      const data = JSON.parse(fs.readFileSync(legacy, "utf8"));
+      data.quality = "fast";
+      fs.writeFileSync(cacheFile, JSON.stringify(data));
+      return res.json({ ...data, cached: true, source: "asr" });
+    }
+  } catch (e) { /* 缓存坏了就重新生成 */ }
+
+  const jobKey = `${cid}:${quality}`;
+  if (asrJobs.has(jobKey)) {
+    try {
+      const data = await asrJobs.get(jobKey);
+      return res.json({ ...data, cached: true, source: "asr" });
+    } catch (e) {
+      return res.status(502).json({ error: e.message || "本地语音识别失败" });
+    }
+  }
+  if (asrBusy) return res.status(409).json({ error: "正在识别另一个视频，请稍后再试" });
+
+  asrBusy = true;
+  const job = runAsrJob({ bvid, aid, cid, req, quality });
+  asrJobs.set(jobKey, job);
+  try {
+    const data = await job;
+    res.json({ ...data, cached: false, source: "asr" });
+  } catch (e) {
+    console.error(`[asr] cid=${cid} quality=${quality} 失败:`, e.message);
+    res.status(502).json({ error: e.message || "本地语音识别失败" });
+  } finally {
+    asrBusy = false;
+    asrJobs.delete(jobKey);
   }
 });
 

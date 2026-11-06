@@ -705,6 +705,112 @@
     background: var(--pink);
     font-weight: 600;
   }
+  /* 视频 / 图文 类型切换：胶囊底 + 分隔线，和右侧排序 tab 区分开 */
+  .type-group {
+    background: var(--bg);
+    border-radius: 16px;
+    padding: 2px;
+    gap: 2px;
+  }
+  .type-group .sort-tab {
+    padding: 4px 16px;
+    border-radius: 14px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .filter-sep {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
+  }
+
+  /* ============ 图文卡片 ============ */
+  .article-grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+  .article-card {
+    display: flex;
+    flex-direction: column;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    color: inherit;
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  .article-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .08);
+  }
+  .article-card:hover .article-title { color: var(--pink); }
+  .article-thumb {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    background: #e7e8ea;
+    overflow: hidden;
+  }
+  .article-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .article-tag {
+    position: absolute;
+    left: 6px;
+    top: 6px;
+    max-width: calc(100% - 12px);
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, .55);
+    color: #fff;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .article-body { padding: 10px 10px 12px; }
+  .article-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.45;
+    height: 2.9em;
+    color: var(--text);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .article-title em {
+    color: var(--pink);
+    font-style: normal;
+  }
+  .article-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-3);
+    min-width: 0;
+  }
+  .article-author {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .article-meta .dot { color: var(--border); }
+  .article-stats {
+    display: flex;
+    gap: 12px;
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-3);
+  }
 
   /* 分页 */
   .pagination {
@@ -831,6 +937,9 @@
     .user-actions .user-icon:not(.always-show) { display: none; }
     .content { padding: 16px 14px 40px; }
     .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+    .article-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .article-body { padding: 8px 8px 10px; }
+    .article-stats { gap: 8px; }
   }
 
   /* ============ 深色模式 ============ */
@@ -873,7 +982,7 @@
 
     <div class="search-wrap">
       <form class="search-box" id="searchForm">
-        <input id="keyword" type="text" placeholder="搜索你感兴趣的视频" autocomplete="off" />
+        <input id="keyword" type="text" placeholder="搜索视频或图文" autocomplete="off" />
         <button type="submit" aria-label="搜索">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <circle cx="11" cy="11" r="7" stroke="white" stroke-width="2"/>
@@ -951,6 +1060,11 @@
     <div class="anime-scroll" id="animeScroll"></div>
   </div>
   <div class="filter-bar" id="filterBar">
+    <div class="filter-group type-group" id="typeGroup">
+      <button class="sort-tab type-tab active" data-type="video">视频</button>
+      <button class="sort-tab type-tab" data-type="article">图文</button>
+    </div>
+    <span class="filter-sep" id="filterSep"></span>
     <div class="filter-group" id="sortGroup">
       <button class="sort-tab active" data-order="">综合排序</button>
       <button class="sort-tab" data-order="click">最多播放</button>
@@ -1207,6 +1321,8 @@ const results = document.getElementById('results');
 const metaRow = document.getElementById('metaRow');
 const pagination = document.getElementById('pagination');
 const filterBar = document.getElementById('filterBar');
+const typeGroup = document.getElementById('typeGroup');
+const filterSep = document.getElementById('filterSep');
 const sortGroup = document.getElementById('sortGroup');
 const recommendSection = document.getElementById('recommendSection');
 const recommendResults = document.getElementById('recommendResults');
@@ -1217,6 +1333,7 @@ let currentKeyword = '';
 let currentPage = 1;
 let totalPages = 1;
 let currentOrder = '';
+let currentType = 'video'; // video | article
 
 function formatCount(n) {
   if (n == null) return '-';
@@ -1270,7 +1387,8 @@ function renderError(msg) {
   pagination.innerHTML = '';
 }
 function renderEmpty(kw) {
-  results.innerHTML = `<div class="placeholder">没有找到与「${kw}」相关的视频</div>`;
+  const what = currentType === 'article' ? '图文' : '视频';
+  results.innerHTML = `<div class="placeholder">没有找到与「${kw}」相关的${what}</div>`;
   pagination.innerHTML = '';
 }
 
@@ -1322,6 +1440,34 @@ function renderResults(list) {
   results.innerHTML = `<div class="grid">${list.map(cardHTML).join('')}</div>`;
 }
 
+function articleCardHTML(a) {
+  const titleText = stripHtml(a.title || '').replace(/"/g, '&quot;');
+  const date = a.pubdate ? formatDate(a.pubdate) : '';
+  return `
+    <div class="article-card" data-cv="${a.id}">
+      <div class="article-thumb">
+        ${a.cover ? `<img src="${a.cover}" loading="lazy" alt="" referrerpolicy="no-referrer" onerror="this.style.opacity=0" />` : ''}
+        ${a.category ? `<span class="article-tag">${a.category}</span>` : ''}
+      </div>
+      <div class="article-body">
+        <p class="article-title" title="${titleText}">${a.title || ''}</p>
+        <div class="article-meta">
+          <span class="article-author">${a.author || '未知作者'}</span>
+          ${date ? `<span class="dot">·</span><span>${date}</span>` : ''}
+        </div>
+        <div class="article-stats">
+          <span>${a.view == null ? '-' : formatCount(a.view) + ' 浏览'}</span>
+          <span>${a.like == null ? '-' : formatCount(a.like) + ' 赞'}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderArticles(list) {
+  results.innerHTML = `<div class="grid article-grid">${list.map(articleCardHTML).join('')}</div>`;
+}
+
 function buildPageNumbers(current, total) {
   const pages = [];
   const windowSize = 2;
@@ -1347,6 +1493,17 @@ function renderPagination() {
     <button class="page-btn" data-page="${currentPage + 1}" ${currentPage >= totalPages ? 'disabled' : ''}>›</button>
   `;
 }
+
+typeGroup.addEventListener('click', (e) => {
+  const btn = e.target.closest('.type-tab');
+  if (!btn || btn.classList.contains('active')) return;
+  typeGroup.querySelectorAll('.type-tab').forEach(el => el.classList.remove('active'));
+  btn.classList.add('active');
+  currentType = btn.dataset.type === 'article' ? 'article' : 'video';
+  sortGroup.style.display = currentType === 'video' ? '' : 'none';
+  filterSep.style.display = currentType === 'video' ? '' : 'none';
+  if (currentKeyword) doSearch(currentKeyword, 1);
+});
 
 sortGroup.addEventListener('click', (e) => {
   const btn = e.target.closest('.sort-tab');
@@ -1472,6 +1629,23 @@ animeScroll.addEventListener('click', async (e) => {
   window.location.href = `/player?ep=${card.dataset.ep}`;
 });
 
+async function searchArticles(keyword, page = 1) {
+  try {
+    const params = new URLSearchParams({ keyword, page: String(page) });
+    const res = await fetch(`/api/search/articles?${params.toString()}`);
+    const data = await res.json();
+    if (!res.ok) { renderError(data.error || '搜索失败,请稍后再试'); totalPages = 1; return; }
+    if (!data.list || data.list.length === 0) { renderEmpty(keyword); totalPages = 1; return; }
+    totalPages = data.totalPages || 1;
+    metaRow.innerHTML = `找到 <b>${formatCount(data.total)}</b> 篇图文`;
+    renderArticles(data.list);
+    renderPagination();
+  } catch (err) {
+    renderError('网络请求失败,请确认代理服务是否正在运行');
+    totalPages = 1;
+  }
+}
+
 async function doSearch(keyword, page = 1) {
   if (!keyword) return;
   enterSearchMode();
@@ -1482,6 +1656,11 @@ async function doSearch(keyword, page = 1) {
   recommendSection.style.display = 'none';
   renderSkeleton();
   loadUpUsers(keyword);
+  if (currentType === 'article') {
+    animeRow.style.display = 'none';
+    await searchArticles(keyword, page);
+    return;
+  }
   loadAnime(keyword);
   try {
     const params = new URLSearchParams({ keyword, page: String(page), order: currentOrder });
@@ -1500,6 +1679,11 @@ async function doSearch(keyword, page = 1) {
 }
 
 results.addEventListener('click', (e) => {
+  const article = e.target.closest('.article-card');
+  if (article) {
+    if (article.dataset.cv) window.location.href = `/opus?cv=${encodeURIComponent(article.dataset.cv)}`;
+    return;
+  }
   const card = e.target.closest('.card');
   if (!card) return;
   const bvid = card.dataset.bvid;

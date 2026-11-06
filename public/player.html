@@ -317,9 +317,10 @@
             border-radius: 8px;
             background: var(--g0a0a0a);
             box-sizing: border-box;
-            padding: 28px;
-            gap: 28px;
+            padding: 24px;
+            gap: 24px;
             overflow: hidden;
+            align-items: stretch;
         }
         .audio-player.show { display: flex; }
         .audio-cover-wrap {
@@ -342,24 +343,82 @@
             min-width: 0;
             display: flex;
             flex-direction: column;
-            justify-content: center;
-            gap: 22px;
+            justify-content: flex-end;
+            gap: 12px;
         }
-        .audio-title {
-            margin: 0 0 12px;
-            font-size: 22px;
-            font-weight: 700;
-            color: var(--gffffff);
-            line-height: 1.35;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            line-clamp: 2;
-            -webkit-box-orient: vertical;
+
+        /* 听视频歌词：占满标题和旧 UP 信息让出来的上半区 */
+        .audio-lyrics-viewport {
+            position: relative;
+            flex: 1 1 auto;
+            min-height: 0;
             overflow: hidden;
         }
-        .audio-up-slot .up-follow {
-            margin: 0;
+        .audio-lyrics-viewport.hidden { display: none; }
+        .audio-lyrics-scroll {
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 0 12px;
+            scrollbar-width: none;
+            overscroll-behavior: contain;
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%);
         }
+        .audio-lyrics-scroll::-webkit-scrollbar { width: 0; height: 0; }
+        .audio-lyric-line {
+            max-width: 100%;
+            margin: 0 auto;
+            padding: 6px 0;
+            text-align: center;
+            font-size: clamp(14px, 1.6vw, 20px);
+            line-height: 1.55;
+            color: var(--g999999);
+            opacity: .52;
+            cursor: pointer;
+            transform-origin: center;
+            transition: color .22s, opacity .22s, transform .22s;
+            word-break: break-word;
+        }
+        .audio-lyric-line:hover { color: var(--gcccccc); opacity: .8; }
+        .audio-lyric-line.active {
+            color: #FB7299;
+            opacity: 1;
+            font-weight: 600;
+            transform: scale(1.035);
+        }
+        .audio-lyric-line .gap { opacity: .5; letter-spacing: .3em; }
+        .audio-lyric-jump {
+            position: absolute;
+            left: 50%;
+            bottom: 8px;
+            transform: translateX(-50%);
+            z-index: 2;
+            padding: 5px 12px;
+            border: 1px solid var(--g333333);
+            border-radius: 999px;
+            background: var(--g141414);
+            color: var(--gbbbbbb);
+            font-size: 12px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .audio-lyric-jump:hover { border-color: var(--g666666); color: var(--gffffff); }
+        .audio-lyric-jump.hidden { display: none; }
+        .audio-lyrics-empty {
+            flex: 1 1 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--g888888);
+            font-size: 15px;
+            letter-spacing: .04em;
+        }
+        .audio-lyrics-empty.hidden { display: none; }
+        .audio-lyrics-empty[data-action="login"],
+        .audio-lyrics-empty[data-action="retry"] { color: #FB7299; cursor: pointer; }
+        .audio-lyrics-empty[data-action="login"]:hover,
+        .audio-lyrics-empty[data-action="retry"]:hover { text-decoration: underline; }
         .audio-progress-row {
             position: relative;
             width: 100%;
@@ -423,7 +482,48 @@
             align-items: center;
             justify-content: center;
             gap: 26px;
+            flex-wrap: wrap;
         }
+        .audio-subtitle-select {
+            max-width: 150px;
+            height: 32px;
+            padding: 0 10px;
+            border: 1px solid var(--g333333);
+            border-radius: 6px;
+            background: var(--g141414);
+            color: var(--gbbbbbb);
+            font-size: 12px;
+            outline: none;
+            cursor: pointer;
+        }
+        .audio-subtitle-select.hidden { display: none; }
+        .audio-subtitle-select:focus { border-color: #FB7299; }
+        .audio-asr-btn {
+            width: auto;
+            min-width: 40px;
+            height: 32px;
+            padding: 0 10px;
+            gap: 4px;
+            border-radius: 16px;
+            border: 1px solid var(--g333333);
+            font-size: 11px;
+            color: var(--gbbbbbb);
+        }
+        .audio-asr-btn span { line-height: 1; }
+        .audio-asr-btn:disabled { opacity: .45; cursor: wait; }
+        .audio-asr-quality {
+            max-width: 128px;
+            height: 32px;
+            padding: 0 8px;
+            border: 1px solid var(--g333333);
+            border-radius: 6px;
+            background: var(--g141414);
+            color: var(--gbbbbbb);
+            font-size: 11px;
+            outline: none;
+            cursor: pointer;
+        }
+        .audio-asr-quality:focus { border-color: #FB7299; }
         /* 页面里全局的 button{padding:12px 30px;background:var(--gffffff);...} 优先级比这里的
            class 选择器低，所以背景/颜色/圆角能正常覆盖；但 padding 如果不显式清零，
            40px 的按钮会被那份 padding 撑成一个变形的大椭圆（图标看起来就跟没有一样）。
@@ -1197,11 +1297,14 @@
             .user-actions .user-icon:not(.always-show) { display: none; }
             .avatar-btn { width: 30px; height: 30px; }
             #videoPlayer { height: 260px; }
-            .audio-player { flex-direction: column; height: auto; padding: 18px; gap: 16px; }
-            .audio-cover-wrap { width: 100%; max-width: 100%; height: 180px; }
-            .audio-main { gap: 14px; }
-            .audio-title { font-size: 17px; }
-            .audio-controls-row { gap: 18px; }
+            .audio-player { flex-direction: column; height: 520px; padding: 16px; gap: 12px; }
+            .audio-cover-wrap { width: 100%; max-width: 100%; height: 110px; }
+            .audio-main { gap: 10px; }
+            .audio-lyrics-viewport { min-height: 150px; }
+            .audio-lyrics-scroll { padding: 0 4px; }
+            .audio-lyric-line { font-size: 15px; padding: 5px 0; }
+            .audio-controls-row { gap: 14px; }
+            .audio-subtitle-select { max-width: 118px; height: 30px; }
         }
     
   /* ============ 深浅色统一变量（自动生成，取代原来分散的灰阶字面量） ============ */
@@ -1488,10 +1591,11 @@
                     <img class="audio-cover" id="audioCoverImg" src="" alt="" referrerpolicy="no-referrer" />
                 </div>
                 <div class="audio-main">
-                    <div class="audio-info">
-                        <p class="audio-title" id="audioTitle"></p>
-                        <div class="audio-up-slot" id="audioUpSlot"></div>
+                    <div class="audio-lyrics-viewport hidden" id="audioLyricsViewport">
+                        <div class="audio-lyrics-scroll" id="audioLyricsScroll"></div>
+                        <button type="button" class="audio-lyric-jump hidden" id="audioLyricJump">回到当前</button>
                     </div>
+                    <div class="audio-lyrics-empty" id="audioLyricsEmpty">无歌词 请欣赏</div>
 
                     <div class="audio-progress-row">
                         <div class="audio-seek-track" id="audioSeekTrack">
@@ -1533,6 +1637,18 @@
                             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7L12 3.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
                             </svg>
+                        </button>
+                        <select class="audio-subtitle-select hidden" id="audioSubtitleSelect" title="字幕语言" aria-label="字幕语言"></select>
+                        <select class="audio-asr-quality" id="audioAsrQuality" title="本地语音识别精度" aria-label="本地语音识别精度">
+                            <option value="fast">粗略（快）</option>
+                            <option value="accurate">精准（几分钟）</option>
+                        </select>
+                        <button type="button" class="audio-ctrl-btn audio-asr-btn" id="audioAsrBtn" title="本地语音识别（B站字幕内容不对时用这个）">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" stroke-width="1.7"/>
+                                <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                            </svg>
+                            <span>ASR</span>
                         </button>
                     </div>
                 </div>
@@ -1795,6 +1911,8 @@
         let currentAid = 0;
         let currentBvid = '';
         let currentCid = 0;
+        // 每次 startPlay 递增；旧请求的 info/play 回调回来时直接丢弃，避免新旧视频串状态
+        let playRequestSeq = 0;
         let currentVideoPic = '';
         let currentPagesList = [];
         let pendingSeekSeconds = 0; // 继续观看：URL 上的 t 参数（秒），视频元数据加载完后 seek 一次
@@ -1946,6 +2064,7 @@
                 _favHasMore = !!d.hasMore;
                 _favPage = pn + 1;
                 renderFavEpisodes();
+                renderAudioEpisodeButtons(); // 列表加载完成后同步听视频模式的上一/下一按钮状态
             } catch (e) {
                 // 加载失败静默处理：滚动到底部会自动重试
             } finally {
@@ -1990,7 +2109,8 @@
             episodeList.innerHTML = '';
             favListCache.forEach((v) => {
                 const isMulti = v.pages && v.pages.length > 1;
-                const mainActive = currentBvid === v.bvid && (!isMulti || currentPage === 1);
+                // 多 P 视频只高亮具体分 P（main 条目不高亮，避免与 P1 同时高亮）
+                const mainActive = currentBvid === v.bvid && !isMulti;
                 const main = document.createElement('div');
                 main.className = 'episode-item' + (mainActive ? ' active' : '');
                 main.textContent = v.title;
@@ -3563,11 +3683,8 @@
         }
         let audioLoopMode = loadAudioLoopMode();
 
-        // 复用同一个 #upFollow 节点（避免另起一套关注状态/逻辑），
-        // 记住它原本挂在哪里，好在切回视频模式时挪回去。
-        const upFollowEl = document.getElementById('upFollow');
-        const upFollowOriginalParent = upFollowEl ? upFollowEl.parentNode : null;
-        const upFollowOriginalNextSibling = upFollowEl ? upFollowEl.nextSibling : null;
+        // UP 主头像 / 关注按钮留在解析栏里（和普通视频模式一样紧挨三连），
+        // 听视频模式不再把 #upFollow 搬进播放器。
 
         function renderAudioLoopBtn() {
             const btn = document.getElementById('audioShuffleBtn');
@@ -3581,6 +3698,17 @@
             const prevBtn = document.getElementById('audioPrevBtn');
             const nextBtn = document.getElementById('audioNextBtn');
             if (!prevBtn || !nextBtn) return;
+            // 收藏夹模式：上一/下一在整个收藏夹列表中导航（不只看当前视频的分 P）
+            if (favFromId && favListCache && favListCache.length > 1) {
+                const idx = favListCache.findIndex(v => v.bvid === currentBvid);
+                const atFirst = idx <= 0;
+                const atLast = idx < 0 || idx >= favListCache.length - 1;
+                prevBtn.disabled = atFirst;
+                nextBtn.disabled = atLast;
+                prevBtn.classList.toggle('disabled', atFirst);
+                nextBtn.classList.toggle('disabled', atLast);
+                return;
+            }
             const total = currentPagesList.length || 0;
             const page = currentPage || 1;
             const atFirst = total <= 1 || page <= 1;
@@ -3593,13 +3721,7 @@
 
         function renderAudioMeta() {
             const coverImg = document.getElementById('audioCoverImg');
-            const titleEl = document.getElementById('audioTitle');
-            const upSlot = document.getElementById('audioUpSlot');
             if (coverImg) coverImg.src = currentVideoPic || '';
-            if (titleEl) titleEl.textContent = document.getElementById('videoTitle').textContent || '';
-            if (upSlot && upFollowEl && audioModeActive && upFollowEl.parentNode !== upSlot) {
-                upSlot.appendChild(upFollowEl);
-            }
         }
 
         function formatAudioTime(sec) {
@@ -3608,6 +3730,267 @@
             const s = Math.floor(sec % 60);
             return `${m}:${String(s).padStart(2, '0')}`;
         }
+
+        /* ---- 听视频歌词：滚动/高亮/点击跳转逻辑参考本地音乐播放器 ---- */
+        const audioLyricsViewport = document.getElementById('audioLyricsViewport');
+        const audioLyricsScroll = document.getElementById('audioLyricsScroll');
+        const audioLyricsEmpty = document.getElementById('audioLyricsEmpty');
+        const audioLyricJump = document.getElementById('audioLyricJump');
+        const audioSubtitleSelect = document.getElementById('audioSubtitleSelect');
+        const audioAsrBtn = document.getElementById('audioAsrBtn');
+        const audioAsrQuality = document.getElementById('audioAsrQuality');
+
+        let audioLyricLines = [];
+        let audioLyricIndex = -2;
+        let audioLyricFollow = true;
+        let audioLyricFollowTimer = 0;
+        let audioSubtitleSeq = 0;
+        let audioAsrSeq = 0;
+        let audioSubtitleTracks = [];
+        let audioSubtitleLan = '';
+        const audioReducedMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+
+        function showAudioLyricsEmpty(text, action) {
+            audioLyricLines = [];
+            audioLyricIndex = -2;
+            audioLyricsScroll.innerHTML = '';
+            audioLyricsViewport.classList.add('hidden');
+            audioLyricsEmpty.classList.remove('hidden');
+            audioLyricsEmpty.textContent = text || '无歌词 请欣赏';
+            audioLyricsEmpty.dataset.action = action || '';
+            audioLyricJump.classList.add('hidden');
+        }
+
+        function sizeAudioLyricScroll() {
+            if (!audioLyricsViewport || audioLyricsViewport.classList.contains('hidden')) return;
+            const pad = Math.max(40, Math.round(audioLyricsViewport.clientHeight / 2 - 20));
+            audioLyricsScroll.style.paddingTop = pad + 'px';
+            audioLyricsScroll.style.paddingBottom = pad + 'px';
+        }
+
+        function scrollToAudioLyric(idx, behavior) {
+            if (idx < 0) return;
+            const el = audioLyricsScroll.querySelector('.audio-lyric-line[data-li="' + idx + '"]');
+            if (!el) return;
+            const top = audioLyricsScroll.scrollTop +
+                (el.getBoundingClientRect().top - audioLyricsScroll.getBoundingClientRect().top) -
+                audioLyricsViewport.clientHeight / 2 + el.offsetHeight / 2;
+            const smooth = behavior === 'smooth' && !(audioReducedMotion && audioReducedMotion.matches);
+            try { audioLyricsScroll.scrollTo({ top: Math.max(0, top), behavior: smooth ? 'smooth' : 'auto' }); }
+            catch (e) { audioLyricsScroll.scrollTop = Math.max(0, top); }
+        }
+
+        function renderAudioLyrics(lines) {
+            audioLyricLines = (lines || []).slice().sort((a, b) => a.time - b.time);
+            audioLyricIndex = -2;
+            audioLyricFollow = true;
+            audioLyricsEmpty.classList.add('hidden');
+            audioLyricsViewport.classList.remove('hidden');
+            audioLyricsScroll.innerHTML = audioLyricLines.map((line, i) =>
+                '<div class="audio-lyric-line" data-li="' + i + '">' +
+                (line.text ? esc(line.text) : '<span class="gap">♪</span>') + '</div>').join('');
+            sizeAudioLyricScroll();
+            updateAudioLyric(true);
+        }
+
+        function updateAudioLyric(force) {
+            if (!audioLyricLines.length) return;
+            const target = audioEl ? (audioEl.currentTime || 0) : 0;
+            let lo = 0, hi = audioLyricLines.length - 1, idx = -1;
+            while (lo <= hi) {
+                const mid = (lo + hi) >> 1;
+                if (audioLyricLines[mid].time <= target + 1e-6) { idx = mid; lo = mid + 1; }
+                else hi = mid - 1;
+            }
+            if (!force && idx === audioLyricIndex) return;
+            const prev = audioLyricsScroll.querySelector('.audio-lyric-line.active');
+            if (prev) prev.classList.remove('active');
+            audioLyricIndex = idx;
+            if (idx >= 0) {
+                const el = audioLyricsScroll.querySelector('.audio-lyric-line[data-li="' + idx + '"]');
+                if (el) el.classList.add('active');
+                if (audioLyricFollow) scrollToAudioLyric(idx, force ? 'auto' : 'smooth');
+            }
+            audioLyricJump.classList.toggle('hidden', audioLyricFollow || idx < 0);
+        }
+
+        /** 用户自己滚时不抢方向盘，停手 3 秒后回到当前句 */
+        function markManualAudioScroll() {
+            if (!audioLyricLines.length) return;
+            audioLyricFollow = false;
+            audioLyricJump.classList.remove('hidden');
+            clearTimeout(audioLyricFollowTimer);
+            audioLyricFollowTimer = setTimeout(() => {
+                if (!audioModeActive) return;
+                audioLyricFollow = true;
+                audioLyricJump.classList.add('hidden');
+                scrollToAudioLyric(audioLyricIndex, 'smooth');
+            }, 3000);
+        }
+
+        async function loadAudioSubtitleTrack(lan, seq) {
+            if (seq == null) seq = ++audioSubtitleSeq;
+            else audioSubtitleSeq = seq;
+            if (!currentCid) { showAudioLyricsEmpty('无歌词 请欣赏'); return; }
+            const params = new URLSearchParams({ cid: String(currentCid) });
+            if (currentAid) params.set('aid', String(currentAid));
+            else if (currentBvid) params.set('bvid', currentBvid);
+            if (lan) params.set('lan', lan);
+            try {
+                const res = await fetch(`/api/subtitle?${params.toString()}`);
+                const data = await res.json().catch(() => ({}));
+                if (seq !== audioSubtitleSeq) return;
+                const list = Array.isArray(data.list) ? data.list : [];
+                if (res.status === 401 || data.loginRequired) { showAudioLyricsEmpty('登录态已失效，点此重新登录', 'login'); return; }
+                if (!res.ok) { showAudioLyricsEmpty((data.error || '字幕加载失败') + '，点此重试', 'retry'); return; }
+                if (!list.length) { showAudioLyricsEmpty('无歌词 请欣赏'); return; }
+                audioSubtitleLan = data.lan || lan || '';
+                if (audioSubtitleSelect && audioSubtitleLan) audioSubtitleSelect.value = audioSubtitleLan;
+                renderAudioLyrics(list.map((x) => ({ time: Number(x.from) || 0, text: String(x.text || '') })));
+            } catch (e) {
+                if (seq === audioSubtitleSeq) showAudioLyricsEmpty('字幕加载失败，点此重试', 'retry');
+            }
+        }
+
+        async function loadAudioSubtitles() {
+            const seq = ++audioSubtitleSeq;
+            ++audioAsrSeq; // 切视频/重新加载时丢弃旧的 ASR 结果
+            audioAsrBtn.disabled = false;
+            audioSubtitleTracks = [];
+            audioSubtitleLan = '';
+            if (audioSubtitleSelect) {
+                audioSubtitleSelect.innerHTML = '';
+                audioSubtitleSelect.classList.add('hidden');
+            }
+            if (!audioModeActive || !currentCid) {
+                showAudioLyricsEmpty('无歌词 请欣赏');
+                return;
+            }
+            showAudioLyricsEmpty('歌词加载中…');
+            const params = new URLSearchParams({ cid: String(currentCid) });
+            if (currentAid) params.set('aid', String(currentAid));
+            else if (currentBvid) params.set('bvid', currentBvid);
+            try {
+                const res = await fetch(`/api/subtitles?${params.toString()}`);
+                const data = await res.json().catch(() => ({}));
+                if (seq !== audioSubtitleSeq) return;
+                if (!res.ok) { showAudioLyricsEmpty((data.error || '字幕加载失败') + '，点此重试', 'retry'); return; }
+                const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+                audioSubtitleTracks = tracks;
+                if (!tracks.length) {
+                    if (data.loginInvalid) showAudioLyricsEmpty('登录态已失效，点此重新登录', 'login');
+                    else if (data.loginRequired) showAudioLyricsEmpty('请先登录后加载字幕', 'login');
+                    else showAudioLyricsEmpty('无歌词 请欣赏');
+                    return;
+                }
+                if (audioSubtitleSelect) {
+                    const labelOf = (t) => {
+                        if (Number(t.type) !== 1) return '（UP）';
+                        return Number(t.aiType) === 0 ? '（AI原声）' : '（AI翻译）';
+                    };
+                    audioSubtitleSelect.innerHTML = tracks.map((t) =>
+                        `<option value="${esc(t.lan)}">${esc(t.lanDoc || t.lan)}${labelOf(t)}</option>`
+                    ).join('') + '<option value="__asr__">本地语音识别（ASR）</option>';
+                    audioSubtitleSelect.classList.toggle('hidden', tracks.length <= 1);
+                    const hasUp = tracks.some((t) => Number(t.type) === 0);
+                    const hasSourceAi = tracks.some((t) => Number(t.type) === 1 && Number(t.aiType) === 0);
+                    audioSubtitleSelect.title = hasUp
+                        ? '优先使用 UP 主字幕'
+                        : hasSourceAi
+                            ? '优先使用 AI 原声字幕；翻译字幕可能不准确'
+                            : '当前只有 AI 翻译字幕，可能不准确；可点 ASR 本地识别';
+                }
+                const first = tracks[0];
+                await loadAudioSubtitleTrack(first.lan, seq);
+            } catch (e) {
+                if (seq === audioSubtitleSeq) showAudioLyricsEmpty('字幕加载失败，点此重试', 'retry');
+            }
+        }
+
+        async function loadAudioAsr() {
+            if (!currentCid) { showAudioLyricsEmpty('无歌词 请欣赏'); return; }
+            const quality = audioAsrQuality && audioAsrQuality.value === 'accurate' ? 'accurate' : 'fast';
+            const seq = ++audioAsrSeq;
+            ++audioSubtitleSeq; // 让还在路上的官方字幕请求作废
+            audioAsrBtn.disabled = true;
+            showAudioLyricsEmpty(quality === 'accurate'
+                ? '精准识别中…可能需要几分钟'
+                : '粗略识别中…通常几十秒到两分钟');
+            const params = new URLSearchParams({ cid: String(currentCid), quality });
+            if (currentAid) params.set('aid', String(currentAid));
+            else if (currentBvid) params.set('bvid', currentBvid);
+            try {
+                const res = await fetch(`/api/subtitle/asr?${params.toString()}`);
+                const data = await res.json().catch(() => ({}));
+                if (seq !== audioAsrSeq) return;
+                if (!res.ok) {
+                    showAudioLyricsEmpty((data.error || '本地识别失败') + '，点此重试', 'asr');
+                    return;
+                }
+                const list = Array.isArray(data.list) ? data.list : [];
+                if (!list.length) { showAudioLyricsEmpty('本地识别没有结果'); return; }
+                audioSubtitleLan = '__asr__';
+                if (audioSubtitleSelect) {
+                    if (!audioSubtitleSelect.querySelector('option[value="__asr__"]')) {
+                        audioSubtitleSelect.insertAdjacentHTML('beforeend', '<option value="__asr__">本地语音识别（ASR）</option>');
+                    }
+                    audioSubtitleSelect.value = '__asr__';
+                    audioSubtitleSelect.classList.remove('hidden');
+                }
+                renderAudioLyrics(list.map((x) => ({ time: Number(x.from) || 0, text: String(x.text || '') })));
+                showToast(quality === 'accurate' ? '精准识别完成' : '粗略识别完成');
+            } catch (e) {
+                if (seq === audioAsrSeq) showAudioLyricsEmpty('本地识别失败，点此重试', 'asr');
+            } finally {
+                if (seq === audioAsrSeq) audioAsrBtn.disabled = false;
+            }
+        }
+
+        try {
+            const q = localStorage.getItem('bili_asr_quality');
+            if (q === 'accurate' || q === 'fast') audioAsrQuality.value = q;
+        } catch (e) {}
+        audioAsrQuality.addEventListener('change', () => {
+            try { localStorage.setItem('bili_asr_quality', audioAsrQuality.value); } catch (e) {}
+        });
+        audioAsrBtn.addEventListener('click', loadAudioAsr);
+
+        audioLyricsEmpty.addEventListener('click', () => {
+            const action = audioLyricsEmpty.dataset.action;
+            if (action === 'login') location.href = '/account';
+            else if (action === 'retry') loadAudioSubtitles();
+            else if (action === 'asr') loadAudioAsr();
+        });
+        audioLyricsScroll.addEventListener('wheel', markManualAudioScroll, { passive: true });
+        audioLyricsScroll.addEventListener('touchstart', markManualAudioScroll, { passive: true });
+        audioLyricsScroll.addEventListener('touchmove', markManualAudioScroll, { passive: true });
+        audioLyricsScroll.addEventListener('pointerdown', markManualAudioScroll);
+        audioLyricsScroll.addEventListener('click', (e) => {
+            const el = e.target.closest('.audio-lyric-line');
+            if (!el) return;
+            const line = audioLyricLines[Number(el.dataset.li)];
+            if (!line || !audioEl || !audioEl.duration) return;
+            try { audioEl.currentTime = line.time; } catch (err) { return; }
+            audioLyricFollow = true;
+            clearTimeout(audioLyricFollowTimer);
+            audioLyricJump.classList.add('hidden');
+            updateAudioLyric(true);
+        });
+        audioLyricJump.addEventListener('click', () => {
+            audioLyricFollow = true;
+            clearTimeout(audioLyricFollowTimer);
+            audioLyricJump.classList.add('hidden');
+            scrollToAudioLyric(audioLyricIndex, 'smooth');
+        });
+        audioSubtitleSelect.addEventListener('change', () => {
+            if (audioSubtitleSelect.value === '__asr__') loadAudioAsr();
+            else loadAudioSubtitleTrack(audioSubtitleSelect.value);
+        });
+        window.addEventListener('resize', () => {
+            if (!audioModeActive) return;
+            sizeAudioLyricScroll();
+            if (audioLyricFollow) scrollToAudioLyric(audioLyricIndex, 'auto');
+        });
 
         let audioSeekDragging = false;
 
@@ -3628,6 +4011,7 @@
             const durEl = document.getElementById('audioDurTime');
             if (curEl) curEl.textContent = formatAudioTime(cur);
             if (durEl) durEl.textContent = formatAudioTime(dur);
+            updateAudioLyric(false);
         }
 
         function setAudioPlayIcon(playing) {
@@ -3669,13 +4053,27 @@
                 }
                 return;
             }
-            if (audioLoopMode === 'random' && total > 1) {
-                let nextPage = currentPage;
-                while (nextPage === currentPage) {
-                    nextPage = 1 + Math.floor(Math.random() * total);
+            if (audioLoopMode === 'random') {
+                // 收藏夹模式：随机切到收藏夹里的另一个视频（含跨分 P）
+                if (favFromId && favListCache && favListCache.length > 1) {
+                    const curIdx = favListCache.findIndex(v => v.bvid === currentBvid);
+                    let nidx = Math.floor(Math.random() * favListCache.length);
+                    if (nidx === curIdx) nidx = (nidx + 1) % favListCache.length;
+                    playFavVideo(nidx);
+                    return;
                 }
-                currentPage = nextPage;
-                startPlay();
+                // 多 P 视频：随机选一个分 P
+                const total = currentPagesList.length || 1;
+                if (total > 1) {
+                    let nextPage = currentPage;
+                    while (nextPage === currentPage) {
+                        nextPage = 1 + Math.floor(Math.random() * total);
+                    }
+                    currentPage = nextPage;
+                    startPlay();
+                    return;
+                }
+                // 单 P 且无收藏夹：没有别的可随机，停止
                 return;
             }
             // 顺序播放（或随机但只有一 P）：有下一集就接着播
@@ -3734,9 +4132,6 @@
                 audioPlayerEl.classList.remove('show');
                 toggleBtn.classList.remove('active');
                 toggleBtn.title = '听视频';
-                if (upFollowEl && upFollowOriginalParent && upFollowEl.parentNode !== upFollowOriginalParent) {
-                    upFollowOriginalParent.insertBefore(upFollowEl, upFollowOriginalNextSibling);
-                }
             }
         }
 
@@ -3764,6 +4159,7 @@
             renderAudioEpisodeButtons();
             renderAudioLoopBtn();
             setAudioPlayIcon(false);
+            loadAudioSubtitles();
 
             try {
                 const params = new URLSearchParams();
@@ -3787,8 +4183,11 @@
                             try { audioEl.currentTime = resumeAt; } catch (e) {}
                         }
                         updateAudioProgressUI();
+                        sizeAudioLyricScroll();
+                        updateAudioLyric(true);
                     });
                     audioEl.addEventListener('timeupdate', updateAudioProgressUI);
+                    audioEl.addEventListener('seeked', () => updateAudioLyric(true));
                     audioEl.addEventListener('play', () => setAudioPlayIcon(true));
                     audioEl.addEventListener('pause', () => setAudioPlayIcon(false));
                     audioEl.addEventListener('ended', handleAudioEnded);
@@ -3838,11 +4237,23 @@
             else audioEl.pause();
         });
         document.getElementById('audioPrevBtn').addEventListener('click', () => {
+            // 收藏夹模式：切到收藏夹里的上一个视频
+            if (favFromId && favListCache && favListCache.length > 1) {
+                const idx = favListCache.findIndex(v => v.bvid === currentBvid);
+                if (idx > 0) playFavVideo(idx - 1);
+                return;
+            }
             if (currentPage <= 1) return;
             currentPage -= 1;
             startPlay();
         });
         document.getElementById('audioNextBtn').addEventListener('click', () => {
+            // 收藏夹模式：切到收藏夹里的下一个视频
+            if (favFromId && favListCache && favListCache.length > 1) {
+                const idx = favListCache.findIndex(v => v.bvid === currentBvid);
+                if (idx >= 0 && idx + 1 < favListCache.length) playFavVideo(idx + 1);
+                return;
+            }
             if (currentPage >= (currentPagesList.length || 1)) return;
             currentPage += 1;
             startPlay();
@@ -3918,6 +4329,7 @@
                 return;
             }
 
+            const seq = ++playRequestSeq;
             let paramType = input.toLowerCase().startsWith('av') ? 'av' : 'bv';
             let cleanId = input.replace(/av/i, '');
 
@@ -3930,6 +4342,7 @@
             fetch(infoUrl)
                 .then((r) => r.json())
                 .then((data) => {
+                    if (seq !== playRequestSeq) return;
                     document.getElementById('videoTitle').textContent =
                         data.code === 0 ? data.title : '';
 
@@ -3938,15 +4351,6 @@
                     renderMetaLine(pubEl, data.code === 0 ? data : null);
 
                     renderDescBox(data.code === 0 ? data.desc : '');
-                    // 收藏夹来源优先（收藏夹视频列表），否则番剧分集优先，否则普通多 P
-                    if (favListCache && favListCache.length > 1) {
-                        renderFavEpisodes();
-                    } else if (window._episodes && window._episodes.length > 1) {
-                        renderBangumiEpisodes(window._episodes, currentBvid);
-                    } else {
-                        renderEpisodeBox(data.code === 0 ? data.pages : [], p);
-                    }
-
                     // UP 主信息（mid / face 需要 /api/info 返回；缺失时按钮仍显示但无法跳转）
                     renderUpFollow(data.code === 0 ? {
                         author: data.author,
@@ -3959,6 +4363,16 @@
                     currentVideoPic = data.code === 0 ? (data.pic || '') : '';
                     currentPagesList = data.code === 0 ? (data.pages || []) : [];
                     videoStat = data.code === 0 ? (data.stat || {}) : {};
+
+                    // 选集列表（必须在 currentBvid/currentPage 更新之后再渲染，高亮才准确）：
+                    // 收藏夹来源优先（收藏夹视频列表），否则番剧分集优先，否则普通多 P
+                    if (favListCache && favListCache.length > 1) {
+                        renderFavEpisodes();
+                    } else if (window._episodes && window._episodes.length > 1) {
+                        renderBangumiEpisodes(window._episodes, currentBvid);
+                    } else {
+                        renderEpisodeBox(data.code === 0 ? data.pages : [], p);
+                    }
                     videoRelation = { liked: false, coin: 0, favorite: false };
                     renderPlayerActions();
                     loadVideoRelation();
@@ -3966,6 +4380,7 @@
                     renderAudioEpisodeButtons();
                 })
                 .catch(() => {
+                    if (seq !== playRequestSeq) return;
                     document.getElementById('videoTitle').textContent = '';
                     const pubEl = document.getElementById('videoPubdate');
                     pubEl.textContent = '';
@@ -3992,6 +4407,7 @@
                 } catch (parseErr) {
                     throw new Error(`接口返回 HTTP ${response.status}`);
                 }
+                if (seq !== playRequestSeq) return;
 
                 document.getElementById('jsonOutput').textContent = JSON.stringify(jsonData, null, 2);
 
@@ -4008,10 +4424,15 @@
 
                 if (hasPlayable) {
                     try {
+                        // 关键：aid/bvid/cid 必须来自同一个播放响应。
+                        // 只听 info 回调拿 aid、只听 play 回调拿 cid 会出现「新 aid + 旧 cid」的竞态，
+                        // 拿到的字幕就会是上一个视频的。
+                        currentAid = Number(jsonData.aid || currentAid || 0);
+                        currentBvid = jsonData.bvid || currentBvid || '';
                         currentCid = Number(jsonData.cid || 0);
                         historyState = {
-                            aid: Number(jsonData.aid || 0),
-                            cid: Number(jsonData.cid || 0),
+                            aid: currentAid,
+                            cid: currentCid,
                         };
                         const danmakuList = await fetchDanmaku(jsonData.cid);
                         initPlayer(jsonData, danmakuList);
@@ -4027,6 +4448,7 @@
                     alert('解析失败：返回结果中缺少可播放的直链');
                 }
             } catch (error) {
+                if (seq !== playRequestSeq) return;
                 console.error('请求接口失败:', error);
                 document.getElementById('jsonOutput').textContent = '请求失败：' + error.message;
                 alert('请求解析接口失败：' + error.message);

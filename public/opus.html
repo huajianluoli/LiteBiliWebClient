@@ -279,20 +279,39 @@ function blocksHTML(blocks, allImages) {
 }
 
 async function init() {
-  const id = new URLSearchParams(location.search).get('id') || '';
+  const params = new URLSearchParams(location.search);
+  let opusId = params.get('id') || '';
+  const cvId = params.get('cv') || '';
+  const articleMode = !!cvId;
+  const id = articleMode ? cvId : opusId;
   if (!/^\d{1,20}$/.test(id)) { wrap.innerHTML = '<div class="op-state">缺少图文 id</div>'; return; }
   let m = { loggedIn: false };
   try { const r = await fetch('/api/me'); m = await r.json(); } catch (e) {}
   applyHeaderLogin(m);
   myMid = Number(m.user && m.user.mid) || 0;
 
+  const externalUrl = articleMode ? `https://www.bilibili.com/read/cv${id}` : `https://www.bilibili.com/opus/${id}`;
+  // 专栏 cvid 先解析成动态 opus id，再走同一套 /api/opus 渲染
+  if (articleMode) {
+    try {
+      const rr = await fetch('/api/article?id=' + id);
+      const rd = await rr.json().catch(() => ({}));
+      if (!rr.ok) throw new Error(rd.error || '专栏解析失败');
+      opusId = String(rd.opusId || '');
+      if (!/^\d{1,20}$/.test(opusId)) throw new Error('专栏解析失败');
+    } catch (e) {
+      wrap.innerHTML = `<div class="op-state">${esc(e.message || '专栏解析失败')}<br><a href="${externalUrl}" target="_blank" rel="noreferrer noopener">去 B 站查看</a></div>`;
+      return;
+    }
+  }
+
   let d;
   try {
-    const r = await fetch('/api/opus?id=' + id);
+    const r = await fetch('/api/opus?id=' + opusId);
     d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || '图文加载失败');
   } catch (e) {
-    wrap.innerHTML = `<div class="op-state">${esc(e.message || '图文加载失败')}<br><a href="https://www.bilibili.com/opus/${id}" target="_blank" rel="noreferrer noopener">去 B 站查看</a></div>`;
+    wrap.innerHTML = `<div class="op-state">${esc(e.message || '图文加载失败')}<br><a href="${externalUrl}" target="_blank" rel="noreferrer noopener">去 B 站查看</a></div>`;
     return;
   }
   document.title = (d.title ? d.title.replace(/<[^>]+>/g, '') : '图文') + ' - B站视频搜索器';
@@ -318,7 +337,7 @@ async function init() {
     <div class="op-body">${body || '<p style="color:var(--text-3)">这篇图文暂时没有可显示的内容</p>'}</div>
     <div class="op-foot">
       <span class="op-cmt-txt" id="opCmtCount" title="评论数">共${fmtCount(d.stat.comment || 0)}条评论</span>
-      <button type="button" class="op-stat${d.stat.liked ? ' active' : ''}" id="opLike">${IC_LIKE}<span>${d.stat.like ? fmtCount(d.stat.like) : '点赞'}</span></button>
+      <button type="button" class="op-stat${d.stat.liked ? ' active' : ''}" id="opLike"${articleMode ? ' title="专栏图文暂不支持在站内点赞" disabled style="opacity:.45;cursor:not-allowed"' : ''}>${IC_LIKE}<span>${d.stat.like ? fmtCount(d.stat.like) : '点赞'}</span></button>
       <button type="button" class="op-stat${d.stat.coined ? ' active' : ''}" id="opCoin"${triple ? '' : ' title="该图文暂不支持投币" disabled style="opacity:.45;cursor:not-allowed"'}>${IC_COIN}<span>${d.stat.coin ? fmtCount(d.stat.coin) : '投币'}</span></button>
       <button type="button" class="op-stat${d.stat.faved ? ' active' : ''}" id="opFav"${triple ? '' : ' title="该图文暂不支持收藏" disabled style="opacity:.45;cursor:not-allowed"'}>${IC_FAV}<span>${d.stat.fav ? fmtCount(d.stat.fav) : '收藏'}</span></button>
     </div>
@@ -383,18 +402,21 @@ async function init() {
     likeBtn.classList.toggle('active', on);
     likeBtn.querySelector('span').textContent = d.stat.like ? fmtCount(d.stat.like) : '点赞';
   };
-  likeBtn.addEventListener('click', async () => {
-    if (likeBtn.classList.contains('busy')) return;
-    const want = !d.stat.liked;
-    const apply = setLikeUI;
-    apply(want); likeBtn.classList.add('busy');
-    try {
-      const r = await fetch('/api/dynamics/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dynId: d.id, like: want }) });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) { apply(!want); showToast(j.error || '点赞失败'); if (r.status === 401) setTimeout(() => location.href = '/account', 1200); }
-    } catch (e) { apply(!want); showToast('网络异常，请重试'); }
-    finally { likeBtn.classList.remove('busy'); }
-  });
+  // 专栏图文（cv）没有对应的动态点赞通道，按钮保持只读；投币时的“同时点赞”仍由后端 select_like 完成
+  if (!articleMode) {
+    likeBtn.addEventListener('click', async () => {
+      if (likeBtn.classList.contains('busy')) return;
+      const want = !d.stat.liked;
+      const apply = setLikeUI;
+      apply(want); likeBtn.classList.add('busy');
+      try {
+        const r = await fetch('/api/dynamics/like', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dynId: d.id, like: want }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { apply(!want); showToast(j.error || '点赞失败'); if (r.status === 401) setTimeout(() => location.href = '/account', 1200); }
+      } catch (e) { apply(!want); showToast('网络异常，请重试'); }
+      finally { likeBtn.classList.remove('busy'); }
+    });
+  }
 
   // 投币 + 收藏：只对专栏型图文（comment_type=12）开放，aid=专栏 id（comment_id_str）
   const oid = d.comment && d.comment.oid;
